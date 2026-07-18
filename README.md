@@ -5,10 +5,14 @@ storage, level filtering, and an extension point for things like remote log
 aggregation — built around four interfaces rather than one concrete logger
 type.
 
-See [`docs/diagrams/01-logGO-structure.puml`](docs/diagrams/01-logGO-structure.puml),
-[`02-logGO-write-sequence.puml`](docs/diagrams/02-logGO-write-sequence.puml) and
-[`03-logGO-read-sequence.puml`](docs/diagrams/03-logGO-read-sequence.puml) for diagrams of
-the structure and both call flows below.
+See [`docs/diagrams/`](docs/diagrams/) for PlantUML diagrams of the structure
+and call flows below: core interfaces/structure
+([`01`](docs/diagrams/01-logGO-structure.puml)), the write
+([`02`](docs/diagrams/02-logGO-write-sequence.puml)) and read
+([`03`](docs/diagrams/03-logGO-read-sequence.puml)) paths, and the standalone
+server's component layout ([`04`](docs/diagrams/04-server-components.puml))
+and ingestion sequence ([`05`](docs/diagrams/05-ingestion-sequence.puml)) —
+see "Standalone server" below.
 
 ## Install
 
@@ -103,18 +107,70 @@ entries, _ := manager.ReadLogs("ERROR", logGO.LogFilter{})
 See `example_test.go` for a runnable, testable version of this (`go doc -all . `
 shows it as `Example`).
 
+## Standalone server
+
+`cmd/server` runs logGO as its own independent service, with its own UI — the
+only relationship to [conTogether](https://github.com/ttfancy/conTogether) is
+that it connects to one as a plain HTTP/WebSocket *client* of its
+already-existing log-reading endpoints (`GET /logs`, `GET /ws/logs`).
+Neither project imports the other's code.
+
+```bash
+CONTOGETHER_URL=http://localhost:8080 \
+CONTOGETHER_API_KEY=dev-key \
+go run ./cmd/server
+```
+
+Open http://localhost:9090 (override with `PORT`). What it does, in order
+(see [`docs/diagrams/05-ingestion-sequence.puml`](docs/diagrams/05-ingestion-sequence.puml)):
+
+1. **Backfill** — `GET /logs` once at startup, pulling everything conTogether
+   already has.
+2. **Live tail** — dials `GET /ws/logs` and ingests every new entry as it's
+   written, for as long as the connection holds.
+3. **Reconnect** — if the WebSocket drops, retries with exponential backoff
+   (capped at 30s) and re-backfills from the last entry actually ingested
+   first, so a brief disconnect doesn't lose anything in the gap.
+
+Every ingested entry is stored via `Manager.WriteEntry` (not `WriteLog`) and
+tagged with a `source` field — `WriteEntry` enqueues an already-built
+`LogEntry` as-is, preserving its *original* timestamp, where `WriteLog` would
+stamp it with `time.Now()`. For an aggregator, using ingestion time instead
+of the original event time would misrepresent when things actually
+happened — see `manager_test.go`'s
+`TestWriteEntryPreservesOriginalTimestamp`.
+
+The UI itself (`internal/webui`) is a single static HTML page — no frontend
+build step, deliberately, to match a "small" project — polling its own
+`GET /entries?level=&contains=` (capped at the 500 most recent entries, so a
+long-running instance doesn't render an unbounded table).
+
+| Env var | Required | Default | Meaning |
+|---|---|---|---|
+| `CONTOGETHER_URL` | yes | — | Base URL of the conTogether instance to ingest from |
+| `CONTOGETHER_API_KEY` | yes | — | API key to authenticate against it |
+| `SOURCE_NAME` | no | `conTogether` | Tag added to every entry ingested from that instance |
+| `PORT` | no | `9090` | logGO's own HTTP listen port |
+| `LOG_FILE_PATH` | no | `logGO.log` | Where logGO persists its own (ingested + self-written) entries |
+
 ## Tests
 
 `go test ./... -race` from the repo root covers:
 
 - Level filtering end to end through `Manager`
 - `WriteLog` after `Close` returning `ErrClosed`
+- `WriteEntry` preserving an ingested entry's original timestamp instead of
+  re-stamping it
 - A genuine concurrency test: many goroutines calling `WriteLog` and
   `RegisterLogHandler` at once, run under `-race`
 - `ClearLogs` boundary semantics (an entry timestamped exactly at the
   cutoff is kept, not cleared)
 - The `DropNewest` policy under a deliberately stalled writer
 - Round-trip write/read/clear against both the `file` and `sqlite` backends
+- `internal/ingest`, against a fake conTogether (`httptest`): backfill then
+  live tail, tagging, and that a disconnect/auth failure retries with
+  backoff instead of giving up, while still respecting context cancellation
+  promptly
 
 ## Known limitations
 

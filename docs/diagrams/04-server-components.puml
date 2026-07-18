@@ -1,0 +1,47 @@
+@startuml
+title logGO - cmd/server Component Overview
+
+package "logGO process" {
+  component "config\n(env vars)" as Config
+  component "internal/ingest\nRun(ctx, opts, manager)" as Ingest
+  component "logGO.Manager\n(this instance's own log store)" as Manager
+  component "internal/webui\nstatic UI page" as WebUI
+  component "HTTP mux\nGET /, GET /entries, GET /healthz" as Mux
+  file "logGO.log\n(JSON lines)" as LogFile
+}
+
+cloud "Remote conTogether instance" {
+  component "GET /logs\n(REST backfill)" as ContogetherREST
+  component "GET /ws/logs\n(WebSocket live tail)" as ContogetherWS
+}
+
+actor Browser
+
+Config --> Ingest : BaseURL, APIKey, Source
+Config --> Mux : Port
+
+Ingest -down-> ContogetherREST : HTTP GET (X-API-Key header)
+Ingest -down-> ContogetherWS : WS Dial (?api_key=)
+Ingest -> Manager : WriteEntry(entry)\n(preserves original timestamp)
+
+Manager -> LogFile : append (async write loop)
+Mux -> Manager : ReadLogs(level, filter)
+Mux -> WebUI : serve index.html
+
+Browser -> Mux : GET / , GET /entries?level=&contains=
+
+note right of Ingest
+  The only relationship between the two
+  projects: logGO is a network *client* of
+  conTogether's already-existing log-reading
+  endpoints. Neither imports the other's code.
+end note
+
+note bottom of Manager
+  Same Manager, same package, this instance
+  just happens to store entries collected
+  from elsewhere instead of (or alongside)
+  writing about itself.
+end note
+
+@enduml

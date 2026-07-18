@@ -1,0 +1,50 @@
+@startuml
+title logGO - Ingestion Sequence (internal/ingest.Run)
+
+participant "cmd/server main()" as Main
+participant "ingest.Run" as Run
+participant "conTogether\nGET /logs" as REST
+participant "conTogether\nGET /ws/logs" as WS
+participant "logGO.Manager\n(this instance)" as Manager
+
+Main -> Run: go Run(ctx, opts, manager)
+activate Run
+
+== Initial backfill: existing history ==
+Run -> REST: GET /logs?since=<zero> (X-API-Key: opts.APIKey)
+REST --> Run: [] remoteEntry{timestamp, level, message, fields}
+loop for each entry
+  Run -> Run: NewEntry(ts, level, message, fields + source tag)
+  Run -> Manager: WriteEntry(entry)
+  note right: preserves the entry's own\ntimestamp -- NOT time.Now(),\nunlike WriteLog
+end
+Run -> Run: lastSeen = newest timestamp seen
+
+== Live tail: everything new from here on ==
+Run -> WS: Dial ws(s)://.../ws/logs?api_key=...
+activate WS
+loop until disconnect or ctx canceled
+  WS --> Run: one JSON message per new entry
+  Run -> Manager: WriteEntry(entry)
+  Run -> Run: lastSeen = entry.timestamp
+end
+WS --> Run: read error (connection dropped)
+deactivate WS
+
+== Reconnect, with backoff and gap-refill ==
+Run -> Manager: WriteLog("WARN", "disconnected, retrying")
+Run -> Run: sleep(backoff); backoff = min(backoff*2, 30s)
+Run -> REST: GET /logs?since=lastSeen\n(catch anything missed while disconnected)
+REST --> Run: [] remoteEntry (the gap)
+loop for each entry
+  Run -> Manager: WriteEntry(entry)
+end
+Run -> Run: backoff reset to 1s
+Run -> WS: Dial again (back to "Live tail" above)
+
+== Shutdown ==
+Main -> Run: ctx canceled (SIGINT/SIGTERM)
+Run --> Main: return ctx.Err()
+deactivate Run
+
+@enduml
