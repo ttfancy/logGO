@@ -1,0 +1,27 @@
+@startuml
+title logGO - WriteLog Sequence (Async Write Path)
+
+participant Caller
+participant LogManager
+queue Channel as "queue chan LogEntry"
+participant WriterLoop as "runWriteLoop() goroutine"
+participant LogWriter
+participant Handlers as "Registered LogHandlers"
+
+Caller -> LogManager: WriteLog(level, message)
+activate LogManager
+LogManager -> LogManager: build LogEntry (from sync.Pool)
+LogManager -> Channel: enqueue entry (non-blocking)
+LogManager --> Caller: return (does not wait for I/O)
+deactivate LogManager
+
+== Background, decoupled from caller ==
+activate WriterLoop
+WriterLoop -> Channel: dequeue entry
+WriterLoop -> LogWriter: Write(entry)
+LogWriter --> WriterLoop: ok / error
+WriterLoop -> Handlers: Handle(entry) for each registered handler
+WriterLoop -> LogManager: release entry back to sync.Pool
+deactivate WriterLoop
+
+@enduml

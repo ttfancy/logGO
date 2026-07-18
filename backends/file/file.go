@@ -1,5 +1,5 @@
 // Package file is a JSON-lines file LogWriter/LogReader/LogClearer —
-// one backend behind the logsys interfaces, demonstrating pluggable
+// one backend behind the logGO interfaces, demonstrating pluggable
 // storage alongside backends/memory and backends/sqlite.
 package file
 
@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"contogether/logsys"
+	"github.com/ttfancy/logGO"
 )
 
-// record is the on-disk JSON representation of a logsys.LogEntry.
+// record is the on-disk JSON representation of a logGO.LogEntry.
 type record struct {
 	Timestamp time.Time      `json:"timestamp"`
-	Level     logsys.Level   `json:"level"`
+	Level     logGO.Level   `json:"level"`
 	Message   string         `json:"message"`
 	Fields    map[string]any `json:"fields,omitempty"`
 }
@@ -44,7 +44,7 @@ func Open(path string) (*Store, error) {
 	}, nil
 }
 
-func (s *Store) Write(e logsys.LogEntry) error {
+func (s *Store) Write(e logGO.LogEntry) error {
 	buf := s.bufs.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer s.bufs.Put(buf)
@@ -70,7 +70,7 @@ func (s *Store) Close() error {
 	return s.f.Close()
 }
 
-func (s *Store) Read(minLevel logsys.Level, filter logsys.LogFilter) ([]logsys.LogEntry, error) {
+func (s *Store) Read(minLevel logGO.Level, filter logGO.LogFilter) ([]logGO.LogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -79,7 +79,7 @@ func (s *Store) Read(minLevel logsys.Level, filter logsys.LogFilter) ([]logsys.L
 	}
 	defer s.f.Seek(0, 2) // restore append position regardless of outcome
 
-	var out []logsys.LogEntry
+	var out []logGO.LogEntry
 	scanner := bufio.NewScanner(s.f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -87,8 +87,8 @@ func (s *Store) Read(minLevel logsys.Level, filter logsys.LogFilter) ([]logsys.L
 		if err := json.Unmarshal(scanner.Bytes(), &r); err != nil {
 			continue // skip a malformed/partial line rather than fail the whole read
 		}
-		e := logsys.NewEntry(r.Timestamp, r.Level, r.Message, r.Fields)
-		if !logsys.LevelAtLeast(e.Level(), minLevel) {
+		e := logGO.NewEntry(r.Timestamp, r.Level, r.Message, r.Fields)
+		if !logGO.LevelAtLeast(e.Level(), minLevel) {
 			continue
 		}
 		if !filter.Matches(e) {
@@ -122,7 +122,7 @@ func (s *Store) Clear(before time.Time) error {
 		return err
 	}
 
-	tmp, err := os.CreateTemp("", "logsys-*.jsonl")
+	tmp, err := os.CreateTemp("", "logGO-*.jsonl")
 	if err != nil {
 		return err
 	}

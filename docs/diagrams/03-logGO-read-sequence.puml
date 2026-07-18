@@ -1,0 +1,21 @@
+@startuml
+title logGO - ReadLogs Sequence (Filtered Query)
+
+actor Client
+participant LogManager
+participant LogReader
+database Backend as "File / SQLite"
+
+Client -> LogManager: ReadLogs(level, filter)
+activate LogManager
+LogManager -> LogReader: Read(level, filter)
+activate LogReader
+LogReader -> Backend: query matching level + filter (Since/Until/Contains)
+Backend --> LogReader: raw rows / lines
+LogReader -> LogReader: deserialize into []LogEntry
+LogReader --> LogManager: []LogEntry
+deactivate LogReader
+LogManager --> Client: []LogEntry
+deactivate LogManager
+
+@enduml

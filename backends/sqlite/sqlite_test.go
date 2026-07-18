@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"contogether/logsys"
-	"contogether/logsys/backends/sqlite"
+	"github.com/ttfancy/logGO"
+	"github.com/ttfancy/logGO/backends/sqlite"
 )
 
 func TestWriteReadClearRoundTrip(t *testing.T) {
@@ -18,9 +18,9 @@ func TestWriteReadClearRoundTrip(t *testing.T) {
 	defer store.Close()
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	entries := []logsys.LogEntry{
-		logsys.NewEntry(base, logsys.InfoLevel, "one", map[string]any{"n": 1.0}),
-		logsys.NewEntry(base.Add(time.Minute), logsys.ErrorLevel, "two", nil),
+	entries := []logGO.LogEntry{
+		logGO.NewEntry(base, logGO.InfoLevel, "one", map[string]any{"n": 1.0}),
+		logGO.NewEntry(base.Add(time.Minute), logGO.ErrorLevel, "two", nil),
 	}
 	for _, e := range entries {
 		if err := store.Write(e); err != nil {
@@ -28,7 +28,7 @@ func TestWriteReadClearRoundTrip(t *testing.T) {
 		}
 	}
 
-	got, err := store.Read(logsys.DebugLevel, logsys.LogFilter{})
+	got, err := store.Read(logGO.DebugLevel, logGO.LogFilter{})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestWriteReadClearRoundTrip(t *testing.T) {
 		t.Fatalf("expected field n=1, got %+v", got[0].Fields())
 	}
 
-	onlyErrors, err := store.Read(logsys.ErrorLevel, logsys.LogFilter{})
+	onlyErrors, err := store.Read(logGO.ErrorLevel, logGO.LogFilter{})
 	if err != nil {
 		t.Fatalf("Read(ErrorLevel) failed: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestWriteReadClearRoundTrip(t *testing.T) {
 	if err := store.Clear(base.Add(30 * time.Second)); err != nil {
 		t.Fatalf("Clear failed: %v", err)
 	}
-	remaining, err := store.Read(logsys.DebugLevel, logsys.LogFilter{})
+	remaining, err := store.Read(logGO.DebugLevel, logGO.LogFilter{})
 	if err != nil {
 		t.Fatalf("Read after Clear failed: %v", err)
 	}

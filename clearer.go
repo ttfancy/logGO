@@ -1,4 +1,4 @@
-package logsys
+package logGO
 
 import "time"
 

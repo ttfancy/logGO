@@ -1,0 +1,62 @@
+@startuml
+title logGO - Core Interfaces & Structure
+
+interface LogEntry {
+  +Timestamp() time.Time
+  +Level() string
+  +Message() string
+  +Fields() map[string]interface{}
+}
+
+interface LogWriter {
+  +Write(entry LogEntry) error
+  +Close() error
+}
+
+interface LogReader {
+  +Read(level string, filter LogFilter) ([]LogEntry, error)
+}
+
+interface LogHandler {
+  +Handle(entry LogEntry)
+}
+
+class LogManager {
+  -writer LogWriter
+  -reader LogReader
+  -queue chan LogEntry
+  -handlers []LogHandler
+  -pool sync.Pool
+  +WriteLog(level string, message string)
+  +ReadLogs(level string, filter LogFilter) ([]LogEntry, error)
+  +ClearLogs(before time.Time) error
+  +RegisterLogHandler(handler LogHandler)
+  -runWriteLoop()
+}
+
+class FileLogWriter
+class FileLogReader
+class SQLiteLogWriter
+class SQLiteLogReader
+
+LogWriter <|.. FileLogWriter
+LogReader <|.. FileLogReader
+LogWriter <|.. SQLiteLogWriter
+LogReader <|.. SQLiteLogReader
+
+LogManager o-- LogWriter : uses
+LogManager o-- LogReader : uses
+LogManager o-- LogHandler : notifies
+LogManager ..> LogEntry : produces/consumes
+
+note right of LogManager
+  WriteLog() pushes to `queue`;
+  a single background goroutine
+  (runWriteLoop) drains the channel
+  and calls writer.Write(), keeping
+  callers non-blocking (async requirement).
+  LogEntry instances come from a
+  sync.Pool to minimize GC pressure.
+end note
+
+@enduml

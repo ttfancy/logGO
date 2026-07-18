@@ -1,4 +1,4 @@
-package logsys
+package logGO
 
 // LogReader defines log read behavior: return entries at or above
 // minLevel that also satisfy filter.

@@ -11,7 +11,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"contogether/logsys"
+	"github.com/ttfancy/logGO"
 )
 
 // Store is a LogWriter/LogReader/LogClearer backed by a SQLite table.
@@ -45,7 +45,7 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) Write(e logsys.LogEntry) error {
+func (s *Store) Write(e logGO.LogEntry) error {
 	fieldsJSON, err := json.Marshal(e.Fields())
 	if err != nil {
 		return err
@@ -59,14 +59,14 @@ func (s *Store) Write(e logsys.LogEntry) error {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) Read(minLevel logsys.Level, filter logsys.LogFilter) ([]logsys.LogEntry, error) {
+func (s *Store) Read(minLevel logGO.Level, filter logGO.LogFilter) ([]logGO.LogEntry, error) {
 	rows, err := s.db.Query(`SELECT ts, level, message, fields FROM log_entries ORDER BY ts ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []logsys.LogEntry
+	var out []logGO.LogEntry
 	for rows.Next() {
 		var ts int64
 		var level, message, fieldsJSON string
@@ -77,8 +77,8 @@ func (s *Store) Read(minLevel logsys.Level, filter logsys.LogFilter) ([]logsys.L
 		if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
 			fields = nil
 		}
-		e := logsys.NewEntry(time.Unix(0, ts), logsys.Level(level), message, fields)
-		if !logsys.LevelAtLeast(e.Level(), minLevel) {
+		e := logGO.NewEntry(time.Unix(0, ts), logGO.Level(level), message, fields)
+		if !logGO.LevelAtLeast(e.Level(), minLevel) {
 			continue
 		}
 		if !filter.Matches(e) {

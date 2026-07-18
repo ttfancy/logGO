@@ -1,14 +1,24 @@
-# logsys
+# logGO
 
 A small, dependency-injected logging system: asynchronous writes, pluggable
 storage, level filtering, and an extension point for things like remote log
 aggregation — built around four interfaces rather than one concrete logger
 type.
 
-See [`../docs/diagrams/01-logsys-structure.puml`](../docs/diagrams/01-logsys-structure.puml),
-[`02-logsys-write-sequence.puml`](../docs/diagrams/02-logsys-write-sequence.puml) and
-[`03-logsys-read-sequence.puml`](../docs/diagrams/03-logsys-read-sequence.puml) for diagrams of
+See [`docs/diagrams/01-logGO-structure.puml`](docs/diagrams/01-logGO-structure.puml),
+[`02-logGO-write-sequence.puml`](docs/diagrams/02-logGO-write-sequence.puml) and
+[`03-logGO-read-sequence.puml`](docs/diagrams/03-logGO-read-sequence.puml) for diagrams of
 the structure and both call flows below.
+
+## Install
+
+```
+go get github.com/ttfancy/logGO
+```
+
+Originally developed as part of [conTogether](https://github.com/ttfancy/conTogether)
+(its container management API's logging middleware), split out into its own
+module so it can be versioned and imported independently.
 
 ## Interfaces
 
@@ -76,18 +86,18 @@ Swapping which backend `Manager` uses is a one-line change at the call site — 
 
 ```go
 store := memory.New() // or file.Open("app.log"), or sqlite.Open("app.db")
-manager := logsys.NewManager(store, store, store)
+manager := logGO.NewManager(store, store, store)
 
-manager.RegisterLogHandler(logsys.LogHandlerFunc(func(e logsys.LogEntry) {
+manager.RegisterLogHandler(logGO.LogHandlerFunc(func(e logGO.LogEntry) {
     fmt.Printf("[%s] %s\n", e.Level(), e.Message())
 }))
 
-manager.WriteLog("INFO", "server started", logsys.F("port", 8080))
+manager.WriteLog("INFO", "server started", logGO.F("port", 8080))
 manager.WriteLog("ERROR", "failed to connect to database")
 
 manager.Close() // flush pending async writes
 
-entries, _ := manager.ReadLogs("ERROR", logsys.LogFilter{})
+entries, _ := manager.ReadLogs("ERROR", logGO.LogFilter{})
 ```
 
 See `example_test.go` for a runnable, testable version of this (`go doc -all . `

@@ -1,4 +1,4 @@
-package logsys
+package logGO
 
 // LogHandler receives every entry as it is written, as an extension point
 // for features like remote log aggregation or alerting (see

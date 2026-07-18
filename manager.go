@@ -1,4 +1,4 @@
-package logsys
+package logGO
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 const defaultQueueSize = 1024
 
 // ErrClosed is returned by WriteLog once the Manager has been closed.
-var ErrClosed = errors.New("logsys: manager is closed")
+var ErrClosed = errors.New("logGO: manager is closed")
 
 // DropPolicy controls what WriteLog does when the async write queue is
 // full.
@@ -74,7 +74,7 @@ type registeredHandler struct {
 
 // NewManager wires a writer, reader and clearer together and starts the
 // background write loop. All three parameters are plain interfaces, so
-// callers inject whichever backend(s) they like (see logsys/backends) —
+// callers inject whichever backend(s) they like (see logGO/backends) —
 // this is the dependency-injection seam the container-api's logging
 // middleware plugs into.
 func NewManager(writer LogWriter, reader LogReader, clearer LogClearer, opts ...Option) *Manager {

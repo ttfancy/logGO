@@ -1,8 +1,8 @@
-// Package logsys is a small, dependency-injected logging system built
+// Package logGO is a small, dependency-injected logging system built
 // around four interfaces: LogWriter, LogReader, LogClearer and
 // LogHandler. Manager wires a writer/reader/clearer together, writes
 // asynchronously, and fans entries out to registered handlers.
-package logsys
+package logGO
 
 import (
 	"strings"
@@ -51,7 +51,7 @@ type Field struct {
 }
 
 // F builds a Field; a small ergonomic helper for WriteLog call sites,
-// e.g. mgr.WriteLog("INFO", "listening", logsys.F("port", 8080)).
+// e.g. mgr.WriteLog("INFO", "listening", logGO.F("port", 8080)).
 func F(key string, value any) Field {
 	return Field{Key: key, Value: value}
 }

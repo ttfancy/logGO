@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"contogether/logsys"
+	"github.com/ttfancy/logGO"
 )
 
 // Store is a thread-safe, in-memory log backend implementing
-// logsys.LogWriter, logsys.LogReader and logsys.LogClearer.
+// logGO.LogWriter, logGO.LogReader and logGO.LogClearer.
 type Store struct {
 	mu      sync.RWMutex
-	entries []logsys.LogEntry
+	entries []logGO.LogEntry
 }
 
 // New returns an empty Store.
@@ -22,7 +22,7 @@ func New() *Store {
 	return &Store{}
 }
 
-func (s *Store) Write(e logsys.LogEntry) error {
+func (s *Store) Write(e logGO.LogEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entries = append(s.entries, e)
@@ -31,13 +31,13 @@ func (s *Store) Write(e logsys.LogEntry) error {
 
 func (s *Store) Close() error { return nil }
 
-func (s *Store) Read(minLevel logsys.Level, filter logsys.LogFilter) ([]logsys.LogEntry, error) {
+func (s *Store) Read(minLevel logGO.Level, filter logGO.LogFilter) ([]logGO.LogEntry, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var out []logsys.LogEntry
+	var out []logGO.LogEntry
 	for _, e := range s.entries {
-		if !logsys.LevelAtLeast(e.Level(), minLevel) {
+		if !logGO.LevelAtLeast(e.Level(), minLevel) {
 			continue
 		}
 		if !filter.Matches(e) {

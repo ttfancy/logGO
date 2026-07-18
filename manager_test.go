@@ -1,12 +1,12 @@
-package logsys_test
+package logGO_test
 
 import (
 	"sync"
 	"testing"
 	"time"
 
-	"contogether/logsys"
-	"contogether/logsys/backends/memory"
+	"github.com/ttfancy/logGO"
+	"github.com/ttfancy/logGO/backends/memory"
 )
 
 type countingHandler struct {
@@ -14,7 +14,7 @@ type countingHandler struct {
 	count int
 }
 
-func (h *countingHandler) Handle(logsys.LogEntry) {
+func (h *countingHandler) Handle(logGO.LogEntry) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.count++
@@ -28,7 +28,7 @@ func (h *countingHandler) Count() int {
 
 func TestWriteLogAndReadLogsLevelFiltering(t *testing.T) {
 	store := memory.New()
-	mgr := logsys.NewManager(store, store, store)
+	mgr := logGO.NewManager(store, store, store)
 
 	handler := &countingHandler{}
 	mgr.RegisterLogHandler(handler)
@@ -48,7 +48,7 @@ func TestWriteLogAndReadLogsLevelFiltering(t *testing.T) {
 		t.Fatalf("handler invocations = %d, want %d", got, len(writes))
 	}
 
-	entries, err := mgr.ReadLogs("WARN", logsys.LogFilter{})
+	entries, err := mgr.ReadLogs("WARN", logGO.LogFilter{})
 	if err != nil {
 		t.Fatalf("ReadLogs failed: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestWriteLogAndReadLogsLevelFiltering(t *testing.T) {
 		t.Fatalf("ReadLogs(WARN) returned %d entries, want 2 (WARN, ERROR)", len(entries))
 	}
 	for _, e := range entries {
-		if e.Level() != logsys.WarnLevel && e.Level() != logsys.ErrorLevel {
+		if e.Level() != logGO.WarnLevel && e.Level() != logGO.ErrorLevel {
 			t.Fatalf("unexpected level in filtered results: %s", e.Level())
 		}
 	}
@@ -64,11 +64,11 @@ func TestWriteLogAndReadLogsLevelFiltering(t *testing.T) {
 
 func TestWriteLogAfterCloseFails(t *testing.T) {
 	store := memory.New()
-	mgr := logsys.NewManager(store, store, store)
+	mgr := logGO.NewManager(store, store, store)
 	if err := mgr.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
-	if err := mgr.WriteLog("INFO", "should not be accepted"); err != logsys.ErrClosed {
+	if err := mgr.WriteLog("INFO", "should not be accepted"); err != logGO.ErrClosed {
 		t.Fatalf("WriteLog after Close = %v, want ErrClosed", err)
 	}
 }
@@ -79,7 +79,7 @@ func TestWriteLogAfterCloseFails(t *testing.T) {
 // connection lifetime instead of leaking for the life of the Manager.
 func TestRegisterLogHandlerUnregister(t *testing.T) {
 	store := memory.New()
-	mgr := logsys.NewManager(store, store, store)
+	mgr := logGO.NewManager(store, store, store)
 
 	kept := &countingHandler{}
 	removed := &countingHandler{}
@@ -123,7 +123,7 @@ func TestRegisterLogHandlerUnregister(t *testing.T) {
 // verify the RWMutex-guarded close and handler slice are actually safe.
 func TestConcurrentWriteAndHandlerRegistration(t *testing.T) {
 	store := memory.New()
-	mgr := logsys.NewManager(store, store, store)
+	mgr := logGO.NewManager(store, store, store)
 
 	var wg sync.WaitGroup
 	for range 50 {
@@ -145,11 +145,11 @@ func TestClearLogsBoundary(t *testing.T) {
 	store := memory.New()
 	cutoff := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	before := logsys.NewEntry(cutoff.Add(-time.Hour), logsys.InfoLevel, "before cutoff", nil)
-	atCutoff := logsys.NewEntry(cutoff, logsys.InfoLevel, "at cutoff", nil)
-	after := logsys.NewEntry(cutoff.Add(time.Hour), logsys.InfoLevel, "after cutoff", nil)
+	before := logGO.NewEntry(cutoff.Add(-time.Hour), logGO.InfoLevel, "before cutoff", nil)
+	atCutoff := logGO.NewEntry(cutoff, logGO.InfoLevel, "at cutoff", nil)
+	after := logGO.NewEntry(cutoff.Add(time.Hour), logGO.InfoLevel, "after cutoff", nil)
 
-	for _, e := range []logsys.LogEntry{before, atCutoff, after} {
+	for _, e := range []logGO.LogEntry{before, atCutoff, after} {
 		if err := store.Write(e); err != nil {
 			t.Fatalf("Write failed: %v", err)
 		}
@@ -159,7 +159,7 @@ func TestClearLogsBoundary(t *testing.T) {
 		t.Fatalf("Clear failed: %v", err)
 	}
 
-	remaining, err := store.Read(logsys.DebugLevel, logsys.LogFilter{})
+	remaining, err := store.Read(logGO.DebugLevel, logGO.LogFilter{})
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
@@ -179,7 +179,7 @@ type blockingWriter struct {
 	release chan struct{}
 }
 
-func (w *blockingWriter) Write(logsys.LogEntry) error {
+func (w *blockingWriter) Write(logGO.LogEntry) error {
 	<-w.release
 	return nil
 }
@@ -191,9 +191,9 @@ func TestDropNewestPolicyDoesNotBlock(t *testing.T) {
 	defer close(bw.release)
 
 	store := memory.New()
-	mgr := logsys.NewManager(bw, store, store,
-		logsys.WithQueueSize(1),
-		logsys.WithDropPolicy(logsys.DropNewest),
+	mgr := logGO.NewManager(bw, store, store,
+		logGO.WithQueueSize(1),
+		logGO.WithDropPolicy(logGO.DropNewest),
 	)
 
 	done := make(chan struct{})
