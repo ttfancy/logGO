@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>logGO</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --text: #3f3f46;
+        --text-h: #08060d;
+        --bg: #fff;
+        --bg-alt: #f7f7f8;
+        --border: #e5e4e7;
+        --accent: #7c3aed;
+        --danger: #b3261e;
+        --danger-bg: rgba(179, 38, 30, 0.08);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --text: #b4b8c2;
+          --text-h: #f3f4f6;
+          --bg: #16171d;
+          --bg-alt: #1c1d24;
+          --border: #2e303a;
+          --accent: #c084fc;
+          --danger: #ff8a80;
+          --danger-bg: rgba(255, 138, 128, 0.12);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 15px/1.5 system-ui, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--border);
+      }
+      h1 { font-size: 18px; color: var(--text-h); margin: 0; }
+      main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+      .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+      select, input, button {
+        font: inherit;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text-h);
+        border-radius: 6px;
+        padding: 6px 10px;
+      }
+      button { cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 14px; }
+      th { font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 500;
+        color: white;
+      }
+      .badge-source { background: var(--accent); }
+      .level-DEBUG { color: var(--text); }
+      .level-INFO { color: #2e9e5b; }
+      .level-WARN { color: #c77d16; }
+      .level-ERROR { color: var(--danger); }
+      .empty { text-align: center; color: var(--text); padding: 24px 0; }
+      .status { font-size: 13px; color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>logGO</h1>
+      <span class="status" id="status">connecting…</span>
+    </header>
+    <main>
+      <p class="status">
+        Aggregated log entries — logGO's own, plus anything ingested live from
+        a connected source (see the <code>source</code> column).
+      </p>
+      <div class="toolbar">
+        <select id="level">
+          <option value="DEBUG">DEBUG+</option>
+          <option value="INFO" selected>INFO+</option>
+          <option value="WARN">WARN+</option>
+          <option value="ERROR">ERROR+</option>
+        </select>
+        <input id="contains" placeholder="message contains…" />
+        <button id="refresh">Refresh now</button>
+        <label class="status"><input type="checkbox" id="auto" checked /> Auto-refresh (2s)</label>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Level</th>
+            <th>Source</th>
+            <th>Message</th>
+            <th>Fields</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="empty" id="empty" style="display: none">No entries match.</p>
+    </main>
+    <script>
+      const rowsEl = document.getElementById('rows');
+      const emptyEl = document.getElementById('empty');
+      const statusEl = document.getElementById('status');
+      const levelEl = document.getElementById('level');
+      const containsEl = document.getElementById('contains');
+      const autoEl = document.getElementById('auto');
+
+      async function refresh() {
+        const params = new URLSearchParams({ level: levelEl.value });
+        if (containsEl.value) params.set('contains', containsEl.value);
+        try {
+          const res = await fetch('/entries?' + params.toString());
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const entries = await res.json();
+          render(entries || []);
+          statusEl.textContent = 'live — ' + (entries ? entries.length : 0) + ' entries';
+        } catch (err) {
+          statusEl.textContent = 'error: ' + err.message;
+        }
+      }
+
+      function render(entries) {
+        rowsEl.innerHTML = '';
+        emptyEl.style.display = entries.length === 0 ? 'block' : 'none';
+        // Newest first.
+        for (const e of entries.slice().reverse()) {
+          const tr = document.createElement('tr');
+          const fields = { ...(e.fields || {}) };
+          const source = fields.source || '(logGO itself)';
+          delete fields.source;
+          tr.innerHTML =
+            '<td class="mono">' + new Date(e.timestamp).toLocaleTimeString() + '</td>' +
+            '<td class="level-' + e.level + '">' + e.level + '</td>' +
+            '<td><span class="badge badge-source">' + escapeHtml(source) + '</span></td>' +
+            '<td>' + escapeHtml(e.message) + '</td>' +
+            '<td class="mono">' + escapeHtml(Object.keys(fields).length ? JSON.stringify(fields) : '') + '</td>';
+          rowsEl.appendChild(tr);
+        }
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[c]));
+      }
+
+      levelEl.addEventListener('change', refresh);
+      containsEl.addEventListener('change', refresh);
+      document.getElementById('refresh').addEventListener('click', refresh);
+
+      let timer = null;
+      function scheduleAuto() {
+        if (timer) clearInterval(timer);
+        if (autoEl.checked) timer = setInterval(refresh, 2000);
+      }
+      autoEl.addEventListener('change', scheduleAuto);
+
+      refresh();
+      scheduleAuto();
+    </script>
+  </body>
+</html>

@@ -62,6 +62,36 @@ func TestWriteLogAndReadLogsLevelFiltering(t *testing.T) {
 	}
 }
 
+// TestWriteEntryPreservesOriginalTimestamp is the point of WriteEntry
+// existing at all: a caller ingesting entries that already happened
+// elsewhere (a log aggregator) must not have them silently re-stamped
+// with time.Now(), unlike WriteLog.
+func TestWriteEntryPreservesOriginalTimestamp(t *testing.T) {
+	store := memory.New()
+	mgr := logGO.NewManager(store, store, store)
+
+	original := time.Now().Add(-time.Hour)
+	e := logGO.NewEntry(original, logGO.InfoLevel, "from elsewhere", map[string]any{"source": "remote"})
+	if err := mgr.WriteEntry(e); err != nil {
+		t.Fatalf("WriteEntry failed: %v", err)
+	}
+	mgr.Close()
+
+	entries, err := mgr.ReadLogs("DEBUG", logGO.LogFilter{})
+	if err != nil {
+		t.Fatalf("ReadLogs failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if !entries[0].Timestamp().Equal(original) {
+		t.Fatalf("timestamp = %v, want the original %v (not re-stamped)", entries[0].Timestamp(), original)
+	}
+	if entries[0].Fields()["source"] != "remote" {
+		t.Fatalf("fields = %+v, want source=remote preserved", entries[0].Fields())
+	}
+}
+
 func TestWriteLogAfterCloseFails(t *testing.T) {
 	store := memory.New()
 	mgr := logGO.NewManager(store, store, store)

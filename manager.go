@@ -92,15 +92,10 @@ func NewManager(writer LogWriter, reader LogReader, clearer LogClearer, opts ...
 	return m
 }
 
-// WriteLog builds a LogEntry and enqueues it for asynchronous writing;
-// it returns before the entry reaches the writer or any handler.
+// WriteLog builds a LogEntry (timestamped now) and enqueues it for
+// asynchronous writing; it returns before the entry reaches the writer
+// or any handler.
 func (m *Manager) WriteLog(level string, message string, fields ...Field) error {
-	m.stateMu.RLock()
-	defer m.stateMu.RUnlock()
-	if m.closed {
-		return ErrClosed
-	}
-
 	var fieldMap map[string]any
 	if len(fields) > 0 {
 		fieldMap = make(map[string]any, len(fields))
@@ -108,7 +103,26 @@ func (m *Manager) WriteLog(level string, message string, fields ...Field) error 
 			fieldMap[f.Key] = f.Value
 		}
 	}
-	e := &entry{ts: time.Now(), level: parseLevel(level), message: message, fields: fieldMap}
+	return m.enqueue(&entry{ts: time.Now(), level: parseLevel(level), message: message, fields: fieldMap})
+}
+
+// WriteEntry enqueues an already-constructed LogEntry as-is, preserving
+// its own Timestamp() rather than stamping it with time.Now() the way
+// WriteLog does. For a caller ingesting or proxying entries that
+// already happened elsewhere — a log aggregator collecting from a
+// remote service, say — using the ingestion time instead of the
+// original event time would misrepresent when things actually
+// happened. Use NewEntry to build one from already-known fields.
+func (m *Manager) WriteEntry(e LogEntry) error {
+	return m.enqueue(e)
+}
+
+func (m *Manager) enqueue(e LogEntry) error {
+	m.stateMu.RLock()
+	defer m.stateMu.RUnlock()
+	if m.closed {
+		return ErrClosed
+	}
 
 	if m.dropPolicy == DropNewest {
 		select {
