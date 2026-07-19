@@ -178,13 +178,102 @@
       .conn-connecting { color: #c77d16; }
       .conn-closed { color: var(--danger); }
       .error-text { color: var(--danger); font-size: 13px; margin: 4px 0 0; }
+      .info-btn {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--text);
+        font-size: 12px;
+        font-style: italic;
+        font-family: Georgia, serif;
+        line-height: 1;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .info-btn:hover { border-color: var(--accent); color: var(--accent); }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+      }
+      .modal {
+        width: min(520px, calc(100vw - 32px));
+        max-height: calc(100vh - 64px);
+        overflow-y: auto;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px 24px;
+      }
+      .modal h2 { font-size: 16px; color: var(--text-h); margin: 0 0 8px; }
+      .modal h3 { font-size: 14px; color: var(--text-h); margin: 16px 0 4px; }
+      .modal p { margin: 4px 0; font-size: 14px; }
+      .modal code {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        background: var(--bg-alt);
+        padding: 1px 4px;
+        border-radius: 4px;
+      }
+      .modal-close {
+        float: right;
+        border: none;
+        background: none;
+        color: var(--text);
+        font-size: 20px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0 0 0 12px;
+      }
+      .modal-close:hover { color: var(--accent); }
     </style>
   </head>
   <body>
     <header>
       <h1>logGO</h1>
+      <button class="info-btn" id="info-toggle" title="About logGO" aria-label="About logGO">i</button>
       <span class="status" id="conn-status">connecting…</span>
     </header>
+    <div class="modal-overlay" id="info-overlay" style="display: none">
+      <div class="modal">
+        <button class="modal-close" id="info-close" aria-label="Close">&times;</button>
+        <h2>What is logGO?</h2>
+        <p>
+          A small, independent log aggregation service. It has no special
+          relationship with any one system; anything that can pull from or
+          push to it shows up the same way, side by side, in the sidebar.
+        </p>
+        <h3>Pull</h3>
+        <p>
+          logGO connects <strong>out</strong> to a service that already exposes
+          a way to read its logs. You give it a name, base URL, and API key;
+          logGO backfills once (<code>GET /logs</code>) then keeps a live
+          WebSocket tail (<code>GET /ws/logs</code>) open, reconnecting with
+          backoff if it drops.
+        </p>
+        <h3>Push</h3>
+        <p>
+          The other direction: logGO does not connect anywhere. A service
+          sends its logs <strong>to</strong> logGO instead, over whichever
+          protocol it speaks: REST (<code>POST /ingest</code>), WebSocket
+          (<code>GET /ws/ingest</code>), or gRPC (<code>IngestService</code>).
+          Registering one here just reserves a name and ID and hands you a
+          snippet you can run right away. It's a convenience, not a
+          requirement. An unregistered source pushing logs still works,
+          tagged under its raw <code>source</code> string instead of a
+          friendly name.
+        </p>
+      </div>
+    </div>
     <div class="layout">
       <aside class="sidebar">
         <h2>Sources</h2>
@@ -247,6 +336,18 @@
       </main>
     </div>
     <script>
+      const infoToggle = document.getElementById('info-toggle')
+      const infoOverlay = document.getElementById('info-overlay')
+      const infoClose = document.getElementById('info-close')
+      infoToggle.addEventListener('click', () => { infoOverlay.style.display = 'flex' })
+      infoClose.addEventListener('click', () => { infoOverlay.style.display = 'none' })
+      infoOverlay.addEventListener('click', (ev) => {
+        if (ev.target === infoOverlay) infoOverlay.style.display = 'none'
+      })
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') infoOverlay.style.display = 'none'
+      })
+
       const rowsEl = document.getElementById('rows')
       const emptyEl = document.getElementById('empty')
       const connStatusEl = document.getElementById('conn-status')
