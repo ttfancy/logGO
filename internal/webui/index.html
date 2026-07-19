@@ -13,6 +13,7 @@
         --bg-alt: #f7f7f8;
         --border: #e5e4e7;
         --accent: #7c3aed;
+        --accent-bg: rgba(124, 58, 237, 0.1);
         --danger: #b3261e;
         --danger-bg: rgba(179, 38, 30, 0.08);
       }
@@ -24,6 +25,7 @@
           --bg-alt: #1c1d24;
           --border: #2e303a;
           --accent: #c084fc;
+          --accent-bg: rgba(192, 132, 252, 0.15);
           --danger: #ff8a80;
           --danger-bg: rgba(255, 138, 128, 0.12);
         }
@@ -43,8 +45,68 @@
         border-bottom: 1px solid var(--border);
       }
       h1 { font-size: 18px; color: var(--text-h); margin: 0; }
-      main { padding: 20px; max-width: 1100px; margin: 0 auto; }
-      .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+      .layout { display: flex; align-items: flex-start; }
+      aside.sidebar {
+        width: 220px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--border);
+        padding: 16px 12px;
+        height: calc(100vh - 49px);
+        overflow-y: auto;
+      }
+      main { flex: 1; padding: 20px; min-width: 0; }
+      .sidebar h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text);
+        font-weight: 500;
+        margin: 0 0 8px;
+      }
+      .source-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .source-item:hover { background: var(--bg-alt); }
+      .source-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+      .source-item .remove {
+        opacity: 0;
+        border: none;
+        background: none;
+        color: var(--danger);
+        cursor: pointer;
+        font-size: 14px;
+        padding: 0 4px;
+      }
+      .source-item:hover .remove { opacity: 1; }
+      .add-service-btn {
+        width: 100%;
+        margin-top: 8px;
+        font: inherit;
+        border: 1px dashed var(--border);
+        background: none;
+        color: var(--text);
+        border-radius: 6px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .add-service-btn:hover { border-color: var(--accent); color: var(--accent); }
+      .add-service-form {
+        margin-top: 8px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-alt);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
       select, input, button {
         font: inherit;
         border: 1px solid var(--border);
@@ -55,6 +117,7 @@
       }
       button { cursor: pointer; }
       button:hover { border-color: var(--accent); }
+      .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
       table { width: 100%; border-collapse: collapse; }
       th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 14px; }
       th { font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -66,111 +129,221 @@
         font-size: 12px;
         font-weight: 500;
         color: white;
+        background: var(--accent);
       }
-      .badge-source { background: var(--accent); }
       .level-DEBUG { color: var(--text); }
       .level-INFO { color: #2e9e5b; }
       .level-WARN { color: #c77d16; }
       .level-ERROR { color: var(--danger); }
       .empty { text-align: center; color: var(--text); padding: 24px 0; }
       .status { font-size: 13px; color: var(--text); }
+      .conn-open { color: #2e9e5b; }
+      .conn-connecting { color: #c77d16; }
+      .conn-closed { color: var(--danger); }
+      .error-text { color: var(--danger); font-size: 13px; margin: 4px 0 0; }
     </style>
   </head>
   <body>
     <header>
       <h1>logGO</h1>
-      <span class="status" id="status">connecting…</span>
+      <span class="status" id="conn-status">connecting…</span>
     </header>
-    <main>
-      <p class="status">
-        Aggregated log entries — logGO's own, plus anything ingested live from
-        a connected source (see the <code>source</code> column).
-      </p>
-      <div class="toolbar">
-        <select id="level">
-          <option value="DEBUG">DEBUG+</option>
-          <option value="INFO" selected>INFO+</option>
-          <option value="WARN">WARN+</option>
-          <option value="ERROR">ERROR+</option>
-        </select>
-        <input id="contains" placeholder="message contains…" />
-        <button id="refresh">Refresh now</button>
-        <label class="status"><input type="checkbox" id="auto" checked /> Auto-refresh (2s)</label>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Level</th>
-            <th>Source</th>
-            <th>Message</th>
-            <th>Fields</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-      <p class="empty" id="empty" style="display: none">No entries match.</p>
-    </main>
+    <div class="layout">
+      <aside class="sidebar">
+        <h2>Sources</h2>
+        <div id="source-list"></div>
+        <button class="add-service-btn" id="add-service-toggle">+ Add service</button>
+        <form class="add-service-form" id="add-service-form" style="display: none">
+          <input id="new-name" placeholder="Name (e.g. staging)" required />
+          <input id="new-url" placeholder="Base URL (e.g. http://host:8080)" required />
+          <input id="new-key" placeholder="API key" required />
+          <button type="submit">Add</button>
+          <p class="error-text" id="add-service-error" style="display: none"></p>
+        </form>
+      </aside>
+      <main>
+        <p class="status">
+          <span id="scope-label">All sources</span> — logGO's own entries plus
+          anything ingested live (see the <code>source</code> column).
+        </p>
+        <div class="toolbar">
+          <select id="level">
+            <option value="DEBUG">DEBUG+</option>
+            <option value="INFO" selected>INFO+</option>
+            <option value="WARN">WARN+</option>
+            <option value="ERROR">ERROR+</option>
+          </select>
+          <input id="contains" placeholder="message contains…" />
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Level</th>
+              <th>Source</th>
+              <th>Message</th>
+              <th>Fields</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <p class="empty" id="empty" style="display: none">No entries match.</p>
+      </main>
+    </div>
     <script>
-      const rowsEl = document.getElementById('rows');
-      const emptyEl = document.getElementById('empty');
-      const statusEl = document.getElementById('status');
-      const levelEl = document.getElementById('level');
-      const containsEl = document.getElementById('contains');
-      const autoEl = document.getElementById('auto');
+      const rowsEl = document.getElementById('rows')
+      const emptyEl = document.getElementById('empty')
+      const connStatusEl = document.getElementById('conn-status')
+      const scopeLabelEl = document.getElementById('scope-label')
+      const levelEl = document.getElementById('level')
+      const containsEl = document.getElementById('contains')
+      const sourceListEl = document.getElementById('source-list')
+      const addServiceToggle = document.getElementById('add-service-toggle')
+      const addServiceForm = document.getElementById('add-service-form')
+      const addServiceError = document.getElementById('add-service-error')
 
-      async function refresh() {
-        const params = new URLSearchParams({ level: levelEl.value });
-        if (containsEl.value) params.set('contains', containsEl.value);
-        try {
-          const res = await fetch('/entries?' + params.toString());
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const entries = await res.json();
-          render(entries || []);
-          statusEl.textContent = 'live — ' + (entries ? entries.length : 0) + ' entries';
-        } catch (err) {
-          statusEl.textContent = 'error: ' + err.message;
-        }
-      }
-
-      function render(entries) {
-        rowsEl.innerHTML = '';
-        emptyEl.style.display = entries.length === 0 ? 'block' : 'none';
-        // Newest first.
-        for (const e of entries.slice().reverse()) {
-          const tr = document.createElement('tr');
-          const fields = { ...(e.fields || {}) };
-          const source = fields.source || '(logGO itself)';
-          delete fields.source;
-          tr.innerHTML =
-            '<td class="mono">' + new Date(e.timestamp).toLocaleTimeString() + '</td>' +
-            '<td class="level-' + e.level + '">' + e.level + '</td>' +
-            '<td><span class="badge badge-source">' + escapeHtml(source) + '</span></td>' +
-            '<td>' + escapeHtml(e.message) + '</td>' +
-            '<td class="mono">' + escapeHtml(Object.keys(fields).length ? JSON.stringify(fields) : '') + '</td>';
-          rowsEl.appendChild(tr);
-        }
-      }
+      let sources = []
+      let selectedSourceID = '' // '' = all sources
+      let socket = null
+      let entries = []
 
       function escapeHtml(s) {
         return String(s).replace(/[&<>"']/g, (c) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-        }[c]));
+        }[c]))
       }
 
-      levelEl.addEventListener('change', refresh);
-      containsEl.addEventListener('change', refresh);
-      document.getElementById('refresh').addEventListener('click', refresh);
-
-      let timer = null;
-      function scheduleAuto() {
-        if (timer) clearInterval(timer);
-        if (autoEl.checked) timer = setInterval(refresh, 2000);
+      function nameForSource(id) {
+        const s = sources.find((s) => s.id === id)
+        return s ? s.name : id
       }
-      autoEl.addEventListener('change', scheduleAuto);
 
-      refresh();
-      scheduleAuto();
+      function render() {
+        rowsEl.innerHTML = ''
+        emptyEl.style.display = entries.length === 0 ? 'block' : 'none'
+        for (const e of entries.slice().reverse()) {
+          const tr = document.createElement('tr')
+          const fields = { ...(e.fields || {}) }
+          const sourceID = fields.source
+          const sourceLabel = sourceID ? nameForSource(sourceID) : '(logGO itself)'
+          delete fields.source
+          tr.innerHTML =
+            '<td class="mono">' + new Date(e.timestamp).toLocaleTimeString() + '</td>' +
+            '<td class="level-' + e.level + '">' + e.level + '</td>' +
+            '<td><span class="badge">' + escapeHtml(sourceLabel) + '</span></td>' +
+            '<td>' + escapeHtml(e.message) + '</td>' +
+            '<td class="mono">' + escapeHtml(Object.keys(fields).length ? JSON.stringify(fields) : '') + '</td>'
+          rowsEl.appendChild(tr)
+        }
+      }
+
+      function renderSourceList() {
+        sourceListEl.innerHTML = ''
+        const allItem = document.createElement('div')
+        allItem.className = 'source-item' + (selectedSourceID === '' ? ' active' : '')
+        allItem.innerHTML = '<span>All sources</span>'
+        allItem.onclick = () => selectSource('')
+        sourceListEl.appendChild(allItem)
+
+        for (const s of sources) {
+          const item = document.createElement('div')
+          item.className = 'source-item' + (selectedSourceID === s.id ? ' active' : '')
+          item.innerHTML = '<span>' + escapeHtml(s.name) + '</span><button class="remove" title="Remove">×</button>'
+          item.querySelector('span').onclick = () => selectSource(s.id)
+          item.querySelector('.remove').onclick = (ev) => {
+            ev.stopPropagation()
+            removeSource(s.id)
+          }
+          sourceListEl.appendChild(item)
+        }
+      }
+
+      function selectSource(id) {
+        selectedSourceID = id
+        scopeLabelEl.textContent = id ? nameForSource(id) : 'All sources'
+        renderSourceList()
+        connect()
+      }
+
+      async function loadSources() {
+        const res = await fetch('/sources')
+        sources = (await res.json()) || []
+        renderSourceList()
+      }
+
+      async function removeSource(id) {
+        if (!confirm('Stop ingesting from "' + nameForSource(id) + '"? Its history stays, only new entries stop.')) return
+        await fetch('/sources/' + encodeURIComponent(id), { method: 'DELETE' })
+        if (selectedSourceID === id) selectedSourceID = ''
+        await loadSources()
+        connect()
+      }
+
+      addServiceToggle.addEventListener('click', () => {
+        addServiceForm.style.display = addServiceForm.style.display === 'none' ? 'flex' : 'none'
+      })
+
+      addServiceForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault()
+        addServiceError.style.display = 'none'
+        const name = document.getElementById('new-name').value.trim()
+        const url = document.getElementById('new-url').value.trim()
+        const key = document.getElementById('new-key').value.trim()
+        try {
+          const res = await fetch('/sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, base_url: url, api_key: key }),
+          })
+          if (!res.ok) throw new Error(await res.text())
+          document.getElementById('new-name').value = ''
+          document.getElementById('new-url').value = ''
+          document.getElementById('new-key').value = ''
+          addServiceForm.style.display = 'none'
+          await loadSources()
+        } catch (err) {
+          addServiceError.textContent = err.message
+          addServiceError.style.display = 'block'
+        }
+      })
+
+      // Real-time push over WebSocket — reconnects whenever the
+      // selected source or filters change, since those are all query
+      // params on the connection itself, not something you can update
+      // on an already-open socket.
+      function connect() {
+        if (socket) socket.close()
+        entries = []
+        render()
+        connStatusEl.textContent = 'connecting…'
+        connStatusEl.className = 'status conn-connecting'
+
+        const params = new URLSearchParams({ level: levelEl.value })
+        if (containsEl.value) params.set('contains', containsEl.value)
+        if (selectedSourceID) params.set('source_id', selectedSourceID)
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+        socket = new WebSocket(proto + '//' + location.host + '/ws/entries?' + params.toString())
+
+        socket.onopen = () => {
+          connStatusEl.textContent = 'live'
+          connStatusEl.className = 'status conn-open'
+        }
+        socket.onmessage = (event) => {
+          entries.push(JSON.parse(event.data))
+          if (entries.length > 500) entries.shift()
+          render()
+        }
+        socket.onclose = () => {
+          connStatusEl.textContent = 'disconnected — retrying…'
+          connStatusEl.className = 'status conn-closed'
+          setTimeout(() => { if (socket && socket.readyState === WebSocket.CLOSED) connect() }, 2000)
+        }
+      }
+
+      levelEl.addEventListener('change', connect)
+      containsEl.addEventListener('change', connect)
+
+      loadSources().then(connect)
     </script>
   </body>
 </html>

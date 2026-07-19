@@ -1,39 +1,31 @@
 package main
 
-import (
-	"fmt"
-	"os"
-)
+import "os"
 
-// config is read from the environment — CONTOGETHER_URL and
-// CONTOGETHER_API_KEY are required (there's nothing sensible to
-// default an integration target to); everything else has a local-dev
-// default.
+// config is read from the environment — everything here now has a
+// local-dev default, including what used to be the only way to point
+// logGO at a conTogether instance (CONTOGETHER_URL/CONTOGETHER_API_KEY):
+// that's an optional convenience that auto-registers as an ordinary
+// source at boot now (see main.go), not the only way in — the primary
+// path is POST /sources (and the UI's "Add service" button) at runtime.
 type config struct {
 	ContogetherURL    string
 	ContogetherAPIKey string
 	SourceName        string
 	Port              string
 	LogFilePath       string
+	SourcesFilePath   string
 }
 
-func loadConfig() (*config, error) {
-	url := os.Getenv("CONTOGETHER_URL")
-	if url == "" {
-		return nil, fmt.Errorf("CONTOGETHER_URL is required, e.g. http://localhost:8080")
-	}
-	apiKey := os.Getenv("CONTOGETHER_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("CONTOGETHER_API_KEY is required")
-	}
-
+func loadConfig() *config {
 	return &config{
-		ContogetherURL:    url,
-		ContogetherAPIKey: apiKey,
+		ContogetherURL:    os.Getenv("CONTOGETHER_URL"),
+		ContogetherAPIKey: os.Getenv("CONTOGETHER_API_KEY"),
 		SourceName:        stringEnv("SOURCE_NAME", "conTogether"),
 		Port:              stringEnv("PORT", "9090"),
 		LogFilePath:       stringEnv("LOG_FILE_PATH", "logGO.log"),
-	}, nil
+		SourcesFilePath:   stringEnv("SOURCES_FILE", "sources.json"),
+	}
 }
 
 func stringEnv(key, def string) string {

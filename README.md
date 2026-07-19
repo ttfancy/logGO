@@ -109,23 +109,39 @@ shows it as `Example`).
 
 ## Standalone server
 
-`cmd/server` runs logGO as its own independent service, with its own UI — the
-only relationship to [conTogether](https://github.com/ttfancy/conTogether) is
-that it connects to one as a plain HTTP/WebSocket *client* of its
-already-existing log-reading endpoints (`GET /logs`, `GET /ws/logs`).
+`cmd/server` runs logGO as its own independent service, with its own
+Dozzle-style UI — the only relationship to
+[conTogether](https://github.com/ttfancy/conTogether) (or any other instance
+you point it at) is that it connects as a plain HTTP/WebSocket *client* of
+its already-existing log-reading endpoints (`GET /logs`, `GET /ws/logs`).
 Neither project imports the other's code.
 
 ```bash
-CONTOGETHER_URL=http://localhost:8080 \
-CONTOGETHER_API_KEY=dev-key \
 go run ./cmd/server
 ```
 
-Open http://localhost:9090 (override with `PORT`). What it does, in order
-(see [`docs/diagrams/05-ingestion-sequence.puml`](docs/diagrams/05-ingestion-sequence.puml)):
+Open http://localhost:9090 (override with `PORT`) and click **+ Add
+service** — no env vars required to get started; sources are managed at
+runtime, not fixed at boot.
 
-1. **Backfill** — `GET /logs` once at startup, pulling everything conTogether
-   already has.
+### Multi-source registry
+
+Any number of remote instances can be ingested at once (`internal/sources`),
+each independent: added via the UI or `POST /sources`
+(`{"name":"...","base_url":"...","api_key":"..."}`), removed via the UI or
+`DELETE /sources/{id}` (stops future ingestion; already-collected history
+stays), and persisted to a small JSON file (`SOURCES_FILE`, default
+`sources.json`) so they survive a restart. The sidebar lists every
+registered source — click one to filter the log view to just it (over a
+WebSocket, genuinely real-time, not polling), or stay on "All sources" to
+see everything interleaved.
+
+For each registered source (see
+[`docs/diagrams/05-ingestion-sequence.puml`](docs/diagrams/05-ingestion-sequence.puml)
+for the full sequence):
+
+1. **Backfill** — `GET /logs` once at registration, pulling everything that
+   instance already has.
 2. **Live tail** — dials `GET /ws/logs` and ingests every new entry as it's
    written, for as long as the connection holds.
 3. **Reconnect** — if the WebSocket drops, retries with exponential backoff
@@ -133,25 +149,36 @@ Open http://localhost:9090 (override with `PORT`). What it does, in order
    first, so a brief disconnect doesn't lose anything in the gap.
 
 Every ingested entry is stored via `Manager.WriteEntry` (not `WriteLog`) and
-tagged with a `source` field — `WriteEntry` enqueues an already-built
-`LogEntry` as-is, preserving its *original* timestamp, where `WriteLog` would
-stamp it with `time.Now()`. For an aggregator, using ingestion time instead
-of the original event time would misrepresent when things actually
-happened — see `manager_test.go`'s
+tagged with the source's ID (not its display name — two sources could share
+a name, IDs are unique) via a `source` field — `WriteEntry` enqueues an
+already-built `LogEntry` as-is, preserving its *original* timestamp, where
+`WriteLog` would stamp it with `time.Now()`. For an aggregator, using
+ingestion time instead of the original event time would misrepresent when
+things actually happened — see `manager_test.go`'s
 `TestWriteEntryPreservesOriginalTimestamp`.
 
-The UI itself (`internal/webui`) is a single static HTML page — no frontend
-build step, deliberately, to match a "small" project — polling its own
-`GET /entries?level=&contains=` (capped at the 500 most recent entries, so a
-long-running instance doesn't render an unbounded table).
+### API
 
-| Env var | Required | Default | Meaning |
-|---|---|---|---|
-| `CONTOGETHER_URL` | yes | — | Base URL of the conTogether instance to ingest from |
-| `CONTOGETHER_API_KEY` | yes | — | API key to authenticate against it |
-| `SOURCE_NAME` | no | `conTogether` | Tag added to every entry ingested from that instance |
-| `PORT` | no | `9090` | logGO's own HTTP listen port |
-| `LOG_FILE_PATH` | no | `logGO.log` | Where logGO persists its own (ingested + self-written) entries |
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/entries?level=&contains=&source_id=` | Historical query, capped at the 500 most recent matches |
+| GET | `/ws/entries?level=&contains=&source_id=` | Backlog, then real-time push — what the UI actually uses |
+| GET | `/sources` | List registered sources (API keys never included) |
+| POST | `/sources` | Add one — `{"name","base_url","api_key"}` |
+| DELETE | `/sources/{id}` | Stop ingesting from it (history stays) |
+
+The UI itself (`internal/webui`) is a single static HTML page — no frontend
+build step, deliberately, to match a "small" project.
+
+### Configuration
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `PORT` | `9090` | logGO's own HTTP listen port |
+| `LOG_FILE_PATH` | `logGO.log` | Where logGO persists its own (ingested + self-written) entries |
+| `SOURCES_FILE` | `sources.json` | Where registered sources are persisted |
+| `CONTOGETHER_URL` / `CONTOGETHER_API_KEY` | — | Optional: auto-registers as an ordinary source at boot (the old single-source way of pointing logGO somewhere) — everything past that first registration works exactly the same as a source added through the UI |
+| `SOURCE_NAME` | `conTogether` | Display name for the source above, if set |
 
 ## Tests
 

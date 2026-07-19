@@ -1,15 +1,15 @@
-// Command server runs logGO as its own log-aggregation service: it
-// connects to a configured conTogether instance as a client of its
-// existing log-reading endpoints (see internal/ingest), stores what it
-// collects in a logGO.Manager of its own, and serves a small UI + JSON
-// API over it. This is the "own UI page, own integration" logGO is
-// meant to demonstrate — a real, independent project, not a library
-// conTogether reaches into.
+// Command server runs logGO as its own log-aggregation service, Dozzle
+// style: any number of remote instances can be added and removed at
+// runtime (see internal/sources), each ingested independently as a
+// client of its existing log-reading endpoints (internal/ingest), with
+// everything collected stored in one logGO.Manager of its own and
+// served over a small UI + JSON/WebSocket API. This is the "own UI
+// page, own integration" logGO is meant to demonstrate — a real,
+// independent project, not a library conTogether reaches into.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -17,17 +17,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ttfancy/logGO"
 	logfile "github.com/ttfancy/logGO/backends/file"
-	"github.com/ttfancy/logGO/internal/ingest"
+
+	"github.com/ttfancy/logGO"
+	"github.com/ttfancy/logGO/internal/sources"
 	"github.com/ttfancy/logGO/internal/webui"
 )
 
 func main() {
-	cfg, err := loadConfig()
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
+	cfg := loadConfig()
 
 	store, err := logfile.Open(cfg.LogFilePath)
 	if err != nil {
@@ -36,19 +34,11 @@ func main() {
 	manager := logGO.NewManager(store, store, store)
 	defer manager.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	go func() {
-		err := ingest.Run(ctx, ingest.Options{
-			BaseURL: cfg.ContogetherURL,
-			APIKey:  cfg.ContogetherAPIKey,
-			Source:  cfg.SourceName,
-		}, manager)
-		if err != nil && ctx.Err() == nil {
-			_ = manager.WriteLog("ERROR", "ingestion stopped unexpectedly", logGO.F("error", err.Error()))
-		}
-	}()
+	registry, err := sources.NewRegistry(cfg.SourcesFilePath, manager)
+	if err != nil {
+		log.Fatalf("load sources: %v", err)
+	}
+	registerConfiguredSource(cfg, registry, manager)
 
 	uiHandler, err := webui.Handler()
 	if err != nil {
@@ -60,32 +50,11 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	mux.HandleFunc("GET /entries", func(w http.ResponseWriter, r *http.Request) {
-		level := r.URL.Query().Get("level")
-		if level == "" {
-			level = "DEBUG"
-		}
-		entries, err := manager.ReadLogs(level, logGO.LogFilter{Contains: r.URL.Query().Get("contains")})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		// A long-running instance accumulates entries without bound
-		// (ReadLogs returns everything matching, oldest first); capping
-		// to the most recent N here is what keeps the UI table (and this
-		// response) from growing unboundedly instead of silently
-		// rendering however many thousand entries have ever been seen.
-		const maxEntries = 500
-		if len(entries) > maxEntries {
-			entries = entries[len(entries)-maxEntries:]
-		}
-		out := make([]entryJSON, len(entries))
-		for i, e := range entries {
-			out[i] = entryJSON{Timestamp: e.Timestamp(), Level: string(e.Level()), Message: e.Message(), Fields: e.Fields()}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(out)
-	})
+	mux.HandleFunc("GET /entries", handleListEntries(manager))
+	mux.HandleFunc("GET /ws/entries", handleWatchEntries(manager))
+	mux.HandleFunc("GET /sources", handleListSources(registry))
+	mux.HandleFunc("POST /sources", handleAddSource(registry))
+	mux.HandleFunc("DELETE /sources/{id}", handleRemoveSource(registry))
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 	go func() {
@@ -93,8 +62,10 @@ func main() {
 			log.Fatalf("server error: %v", err)
 		}
 	}()
-	_ = manager.WriteLog("INFO", "logGO server listening", logGO.F("addr", srv.Addr), logGO.F("ingesting_from", cfg.ContogetherURL))
+	_ = manager.WriteLog("INFO", "logGO server listening", logGO.F("addr", srv.Addr))
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -104,9 +75,23 @@ func main() {
 	}
 }
 
-type entryJSON struct {
-	Timestamp time.Time      `json:"timestamp"`
-	Level     string         `json:"level"`
-	Message   string         `json:"message"`
-	Fields    map[string]any `json:"fields,omitempty"`
+// registerConfiguredSource is the backward-compatible on-ramp: if
+// CONTOGETHER_URL/CONTOGETHER_API_KEY are set (the only way to point
+// logGO anywhere in the previous single-source version), it's
+// auto-registered as an ordinary source at boot — unless a source
+// pointing at the same URL is already persisted from a previous run,
+// so restarting doesn't pile up duplicate registrations of the same
+// instance.
+func registerConfiguredSource(cfg *config, registry *sources.Registry, manager *logGO.Manager) {
+	if cfg.ContogetherURL == "" || cfg.ContogetherAPIKey == "" {
+		return
+	}
+	for _, s := range registry.List() {
+		if s.BaseURL == cfg.ContogetherURL {
+			return
+		}
+	}
+	if _, err := registry.Add(cfg.SourceName, cfg.ContogetherURL, cfg.ContogetherAPIKey); err != nil {
+		_ = manager.WriteLog("ERROR", "failed to auto-register CONTOGETHER_URL as a source", logGO.F("error", err.Error()))
+	}
 }
