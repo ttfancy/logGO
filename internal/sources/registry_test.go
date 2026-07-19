@@ -146,6 +146,81 @@ func TestRemoveUnknownIDReturnsErrNotFound(t *testing.T) {
 	}
 }
 
+func TestAddPushRegistersWithoutConnectingOut(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sources.json")
+	registry, err := sources.NewRegistry(path, testManager(t))
+	if err != nil {
+		t.Fatalf("NewRegistry failed: %v", err)
+	}
+
+	added, err := registry.AddPush("checkout-service", "grpc")
+	if err != nil {
+		t.Fatalf("AddPush failed: %v", err)
+	}
+	if added.Kind != sources.KindPush || added.Protocol != "grpc" {
+		t.Fatalf("unexpected source: %+v", added)
+	}
+	if added.BaseURL != "" || added.APIKey != "" {
+		t.Fatalf("a push source shouldn't have BaseURL/APIKey: %+v", added)
+	}
+
+	list := registry.List()
+	if len(list) != 1 || list[0].ID != added.ID || list[0].Kind != sources.KindPush {
+		t.Fatalf("List = %+v, want the just-added push source", list)
+	}
+
+	// Remove must return promptly (no ingestion goroutine to wait on) —
+	// this is really what proves nothing tried to connect anywhere.
+	done := make(chan error, 1)
+	go func() { done <- registry.Remove(added.ID) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Remove failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Remove of a push source didn't return promptly")
+	}
+}
+
+func TestAddPushRejectsMissingNameOrBadProtocol(t *testing.T) {
+	registry, err := sources.NewRegistry(filepath.Join(t.TempDir(), "sources.json"), testManager(t))
+	if err != nil {
+		t.Fatalf("NewRegistry failed: %v", err)
+	}
+	if _, err := registry.AddPush("", "rest"); err == nil {
+		t.Fatal("expected AddPush with an empty name to fail")
+	}
+	if _, err := registry.AddPush("name", "carrier-pigeon"); err == nil {
+		t.Fatal("expected AddPush with an unrecognized protocol to fail")
+	}
+}
+
+// TestLegacySourceWithoutKindTreatedAsPull confirms a sources.json
+// written before push sources existed (no "kind" field at all) still
+// starts ingesting on reload, rather than being silently treated as an
+// inert push source and losing its pull behavior.
+func TestLegacySourceWithoutKindTreatedAsPull(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sources.json")
+	instance := fakeInstance(t)
+	legacy := `[{"id":"abc123","name":"staging","base_url":"` + instance.URL + `","api_key":"secret-key"}]`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed sources.json: %v", err)
+	}
+
+	registry, err := sources.NewRegistry(path, testManager(t))
+	if err != nil {
+		t.Fatalf("NewRegistry failed: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for registry.NameForID("abc123") == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if name := registry.NameForID("abc123"); name != "staging" {
+		t.Fatalf("NameForID(legacy source) = %q, want %q — legacy (kind-less) sources must still be treated as pull", name, "staging")
+	}
+}
+
 // TestNewRegistryReloadsPersistedSources is what actually proves
 // persistence survives a restart: a fresh Registry pointed at the same
 // file a previous one saved to must come back up already ingesting.

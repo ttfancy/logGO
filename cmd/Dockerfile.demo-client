@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# Shared build for all three demo clients (rest, ws, grpc) — they're
+# identical in structure (env-configured loop pushing sample entries),
+# so one Dockerfile parameterized by which cmd/demo-*-client to build
+# instead of three near-copies. See docker-compose.yml for how each
+# image is built with a different CLIENT build arg.
+FROM golang:1.26-bookworm AS build
+ARG CLIENT
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+    -o /out/client ./cmd/${CLIENT}
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=build /out/client /usr/local/bin/client
+ENTRYPOINT ["/usr/local/bin/client"]

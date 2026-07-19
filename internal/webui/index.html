@@ -107,6 +107,43 @@
         flex-direction: column;
         gap: 6px;
       }
+      .kind-toggle { display: flex; gap: 4px; margin-bottom: 2px; }
+      .kind-toggle button {
+        flex: 1;
+        font-size: 13px;
+        padding: 4px 6px;
+        background: var(--bg);
+      }
+      .kind-toggle button.active { background: var(--accent); border-color: var(--accent); color: white; }
+      .field-hint { font-size: 12px; color: var(--text); margin: 0; }
+      .push-instructions {
+        margin-top: 8px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-alt);
+      }
+      .push-instructions pre {
+        margin: 6px 0 0;
+        padding: 8px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow-x: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .protocol-badge {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 500;
+        margin-left: 6px;
+        border: 1px solid var(--border);
+        color: var(--text);
+      }
       select, input, button {
         font: inherit;
         border: 1px solid var(--border);
@@ -154,12 +191,31 @@
         <div id="source-list"></div>
         <button class="add-service-btn" id="add-service-toggle">+ Add service</button>
         <form class="add-service-form" id="add-service-form" style="display: none">
-          <input id="new-name" placeholder="Name (e.g. staging)" required />
-          <input id="new-url" placeholder="Base URL (e.g. http://host:8080)" required />
-          <input id="new-key" placeholder="API key" required />
+          <div class="kind-toggle">
+            <button type="button" class="active" data-kind="push" id="kind-push">Push</button>
+            <button type="button" data-kind="pull" id="kind-pull">Pull</button>
+          </div>
+
+          <input id="new-name" placeholder="Name (e.g. checkout-service)" required />
+
+          <div id="push-fields">
+            <p class="field-hint">How will this service send its logs to logGO?</p>
+            <select id="new-protocol">
+              <option value="rest">REST (POST /ingest)</option>
+              <option value="websocket">WebSocket (persistent connection)</option>
+              <option value="grpc">gRPC (IngestService)</option>
+            </select>
+          </div>
+
+          <div id="pull-fields" style="display: none">
+            <input id="new-url" placeholder="Base URL (e.g. http://host:8080)" />
+            <input id="new-key" placeholder="API key" />
+          </div>
+
           <button type="submit">Add</button>
           <p class="error-text" id="add-service-error" style="display: none"></p>
         </form>
+        <div class="push-instructions" id="push-instructions" style="display: none"></div>
       </aside>
       <main>
         <p class="status">
@@ -248,7 +304,10 @@
         for (const s of sources) {
           const item = document.createElement('div')
           item.className = 'source-item' + (selectedSourceID === s.id ? ' active' : '')
-          item.innerHTML = '<span>' + escapeHtml(s.name) + '</span><button class="remove" title="Remove">×</button>'
+          const badge = s.kind === 'push' && s.protocol
+            ? '<span class="protocol-badge">' + escapeHtml(s.protocol) + '</span>'
+            : ''
+          item.innerHTML = '<span>' + escapeHtml(s.name) + badge + '</span><button class="remove" title="Remove">×</button>'
           item.querySelector('span').onclick = () => selectSource(s.id)
           item.querySelector('.remove').onclick = (ev) => {
             ev.stopPropagation()
@@ -279,28 +338,77 @@
         connect()
       }
 
+      const pushFieldsEl = document.getElementById('push-fields')
+      const pullFieldsEl = document.getElementById('pull-fields')
+      const pushInstructionsEl = document.getElementById('push-instructions')
+      let selectedKind = 'push'
+
+      function setKind(kind) {
+        selectedKind = kind
+        document.getElementById('kind-push').classList.toggle('active', kind === 'push')
+        document.getElementById('kind-pull').classList.toggle('active', kind === 'pull')
+        pushFieldsEl.style.display = kind === 'push' ? 'block' : 'none'
+        pullFieldsEl.style.display = kind === 'pull' ? 'block' : 'none'
+        document.getElementById('new-url').required = kind === 'pull'
+        document.getElementById('new-key').required = kind === 'pull'
+      }
+      document.getElementById('kind-push').addEventListener('click', () => setKind('push'))
+      document.getElementById('kind-pull').addEventListener('click', () => setKind('pull'))
+
+      // Snippets shown after registering a push source — the actual
+      // wire format each protocol expects (see cmd/server/ingest_handlers.go
+      // and cmd/demo-*-client for working examples of each).
+      function pushSnippet(protocol, id) {
+        const body = JSON.stringify({ source: id, level: 'INFO', message: 'hello' })
+        if (protocol === 'rest') {
+          return "curl -X POST http://" + location.host + "/ingest \\\n" +
+            "  -H 'Content-Type: application/json' -d '" + body + "'"
+        }
+        if (protocol === 'websocket') {
+          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+          return "wscat -c " + proto + "//" + location.host + "/ws/ingest\n> " + body
+        }
+        return "grpcurl -plaintext -d '" + JSON.stringify({ source: id, entry: { level: 'INFO', message: 'hello' } }) +
+          "' \\\n  " + location.host + " ingest.v1.IngestService/Ingest"
+      }
+
       addServiceToggle.addEventListener('click', () => {
         addServiceForm.style.display = addServiceForm.style.display === 'none' ? 'flex' : 'none'
+        pushInstructionsEl.style.display = 'none'
       })
 
       addServiceForm.addEventListener('submit', async (ev) => {
         ev.preventDefault()
         addServiceError.style.display = 'none'
         const name = document.getElementById('new-name').value.trim()
-        const url = document.getElementById('new-url').value.trim()
-        const key = document.getElementById('new-key').value.trim()
+        const body = selectedKind === 'push'
+          ? { name, kind: 'push', protocol: document.getElementById('new-protocol').value }
+          : {
+              name,
+              kind: 'pull',
+              base_url: document.getElementById('new-url').value.trim(),
+              api_key: document.getElementById('new-key').value.trim(),
+            }
         try {
           const res = await fetch('/sources', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, base_url: url, api_key: key }),
+            body: JSON.stringify(body),
           })
           if (!res.ok) throw new Error(await res.text())
+          const added = await res.json()
           document.getElementById('new-name').value = ''
           document.getElementById('new-url').value = ''
           document.getElementById('new-key').value = ''
           addServiceForm.style.display = 'none'
           await loadSources()
+
+          if (selectedKind === 'push') {
+            pushInstructionsEl.innerHTML =
+              '<p class="field-hint">"' + escapeHtml(added.name) + '" registered — point it at logGO with:</p>' +
+              '<pre>' + escapeHtml(pushSnippet(added.protocol, added.id)) + '</pre>'
+            pushInstructionsEl.style.display = 'block'
+          }
         } catch (err) {
           addServiceError.textContent = err.message
           addServiceError.style.display = 'block'

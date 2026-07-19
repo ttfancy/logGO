@@ -17,9 +17,13 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
 	logfile "github.com/ttfancy/logGO/backends/file"
 
 	"github.com/ttfancy/logGO"
+	"github.com/ttfancy/logGO/internal/genproto/ingest/v1/ingestv1connect"
 	"github.com/ttfancy/logGO/internal/sources"
 	"github.com/ttfancy/logGO/internal/webui"
 )
@@ -56,7 +60,26 @@ func main() {
 	mux.HandleFunc("POST /sources", handleAddSource(registry))
 	mux.HandleFunc("DELETE /sources/{id}", handleRemoveSource(registry))
 
-	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
+	// Three ways in for a client pushing entries directly (as opposed to
+	// logGO pulling from a registered source): plain REST, a persistent
+	// WebSocket, and gRPC/Connect — see cmd/demo-*-client for one
+	// example of each actually using its protocol.
+	mux.HandleFunc("POST /ingest", handleIngestREST(manager))
+	mux.HandleFunc("GET /ws/ingest", handleIngestWS(manager))
+	ingestPath, ingestHandler := ingestv1connect.NewIngestServiceHandler(&ingestServiceHandler{manager: manager})
+	// Scoped to POST: an unscoped pattern here is a subtree match for any
+	// method, which ambiguously overlaps with "GET /" (also a subtree,
+	// for the UI/static assets) — net/http's mux refuses to register
+	// that as neither pattern is strictly more specific than the other,
+	// and panics at startup. A gRPC/Connect unary call is POST-only
+	// anyway, so this loses nothing.
+	mux.Handle("POST "+ingestPath, ingestHandler)
+
+	// h2c: plain-text HTTP/2, so a real (non-Web) gRPC client can reach
+	// IngestService without TLS — the REST/WebSocket routes above and
+	// Connect's own JSON/gRPC-Web protocols are all fine over HTTP/1.1
+	// and unaffected by this either way.
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: h2c.NewHandler(mux, &http2.Server{})}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)

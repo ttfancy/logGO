@@ -171,10 +171,16 @@ func handleListSources(registry *sources.Registry) http.HandlerFunc {
 	}
 }
 
+// addSourceRequest covers both directions: Kind == "push" only reads
+// Name/Protocol, anything else (including the empty default, for
+// back-compat with clients that predate push sources) only reads
+// Name/BaseURL/APIKey.
 type addSourceRequest struct {
-	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
 }
 
 func handleAddSource(registry *sources.Registry) http.HandlerFunc {
@@ -184,7 +190,15 @@ func handleAddSource(registry *sources.Registry) http.HandlerFunc {
 			http.Error(w, fmt.Sprintf("invalid request body: %s", err), http.StatusBadRequest)
 			return
 		}
-		added, err := registry.Add(req.Name, req.BaseURL, req.APIKey)
+		var (
+			added sources.Source
+			err   error
+		)
+		if req.Kind == sources.KindPush {
+			added, err = registry.AddPush(req.Name, req.Protocol)
+		} else {
+			added, err = registry.Add(req.Name, req.BaseURL, req.APIKey)
+		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

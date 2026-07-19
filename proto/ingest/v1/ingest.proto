@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package ingest.v1;
+
+option go_package = "github.com/ttfancy/logGO/internal/genproto/ingest/v1;ingestv1";
+
+// Field is a structured key/value pair on a LogEntry. value_json is the
+// JSON encoding of the original value (a number, bool, string, or
+// nested object) rather than a plain string field, so arbitrary field
+// types survive the wire the same way they do over the REST/WebSocket
+// ingestion paths — proto3 has no "any-typed" scalar, and adding
+// google.protobuf.Struct/Value here would pull in the well-known-types
+// dependency for what a plain string round-trips just as well.
+message Field {
+  string key = 1;
+  string value_json = 2;
+}
+
+message LogEntry {
+  int64 timestamp_unix_nano = 1;
+  string level = 2;
+  string message = 3;
+  repeated Field fields = 4;
+}
+
+message IngestRequest {
+  // source tags who's pushing this entry — shown in logGO's UI as the
+  // source badge, same as an entry ingested by pulling from a remote
+  // instance (internal/ingest), just pushed instead of pulled.
+  string source = 1;
+  LogEntry entry = 2;
+}
+
+message IngestResponse {}
+
+// IngestService is logGO's push-ingestion API: unlike internal/ingest
+// (which pulls from a remote conTogether-shaped REST/WebSocket log
+// API), this is the other direction — any client can push entries
+// directly, over whichever of logGO's three ingestion protocols suits
+// it (REST POST /ingest, this gRPC/Connect service, or WebSocket
+// GET /ws/ingest — see cmd/server).
+service IngestService {
+  // Ingest accepts a single log entry. Deliberately unary, not
+  // streaming: the point of exposing three protocols here is breadth
+  // (any client, any transport, can reach logGO), not throughput —
+  // a streaming variant is a reasonable future addition if a real
+  // high-volume client ever needs it.
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+}

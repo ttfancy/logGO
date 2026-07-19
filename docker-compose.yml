@@ -1,0 +1,46 @@
+services:
+  loggo:
+    build: .
+    ports:
+      - "9090:9090"
+    volumes:
+      - loggo-data:/data
+    environment:
+      LOG_FILE_PATH: /data/logGO.log
+      SOURCES_FILE: /data/sources.json
+
+  demo-rest-client:
+    build:
+      context: .
+      dockerfile: cmd/Dockerfile.demo-client
+      args:
+        CLIENT: demo-rest-client
+    environment:
+      LOGGO_URL: http://loggo:9090
+    depends_on:
+      - loggo
+
+  demo-ws-client:
+    build:
+      context: .
+      dockerfile: cmd/Dockerfile.demo-client
+      args:
+        CLIENT: demo-ws-client
+    environment:
+      LOGGO_URL: http://loggo:9090
+    depends_on:
+      - loggo
+
+  demo-grpc-client:
+    build:
+      context: .
+      dockerfile: cmd/Dockerfile.demo-client
+      args:
+        CLIENT: demo-grpc-client
+    environment:
+      LOGGO_URL: http://loggo:9090
+    depends_on:
+      - loggo
+
+volumes:
+  loggo-data:

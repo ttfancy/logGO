@@ -126,17 +126,29 @@ runtime, not fixed at boot.
 
 ### Multi-source registry
 
-Any number of remote instances can be ingested at once (`internal/sources`),
-each independent: added via the UI or `POST /sources`
-(`{"name":"...","base_url":"...","api_key":"..."}`), removed via the UI or
-`DELETE /sources/{id}` (stops future ingestion; already-collected history
-stays), and persisted to a small JSON file (`SOURCES_FILE`, default
-`sources.json`) so they survive a restart. The sidebar lists every
-registered source — click one to filter the log view to just it (over a
-WebSocket, genuinely real-time, not polling), or stay on "All sources" to
-see everything interleaved.
+Any number of sources can be registered at once (`internal/sources`), each
+independent, removed via the UI or `DELETE /sources/{id}` (stops future
+ingestion; already-collected history stays), and persisted to a small JSON
+file (`SOURCES_FILE`, default `sources.json`) so they survive a restart. The
+sidebar lists every registered source — click one to filter the log view to
+just it (over a WebSocket, genuinely real-time, not polling), or stay on
+"All sources" to see everything interleaved.
 
-For each registered source (see
+A source is one of two kinds, chosen in the UI's "+ Add service" form (or via
+`kind` in `POST /sources`):
+
+- **Pull** (`kind: "pull"`, the original design) — logGO connects *out* to
+  `{"name":"...","base_url":"...","api_key":"..."}`, the same as before push
+  sources existed; a saved `sources.json` from before this field existed has
+  no `kind` at all and is still treated as pull.
+- **Push** (`kind: "push"`, `{"name":"...","protocol":"rest"|"websocket"|"grpc"}`)
+  — the inverse: logGO doesn't connect anywhere, a client pushes to it. Adding
+  one just reserves a name and an ID; the UI then shows a copy-pasteable
+  snippet (curl/wscat/grpcurl) for the chosen protocol, using that ID as the
+  entry's `source` so it shows up under the registered name instead of a raw
+  string. See "Push ingestion" below for the actual wire formats.
+
+For each **pull** source (see
 [`docs/diagrams/05-ingestion-sequence.puml`](docs/diagrams/05-ingestion-sequence.puml)
 for the full sequence):
 
@@ -157,6 +169,40 @@ ingestion time instead of the original event time would misrepresent when
 things actually happened — see `manager_test.go`'s
 `TestWriteEntryPreservesOriginalTimestamp`.
 
+### Push ingestion
+
+Registering a push source above (or skipping registration entirely — see
+below) is how a client tells logGO it'll be *pushing* entries, over
+whichever of three protocols suits it. See `cmd/demo-rest-client`,
+`cmd/demo-ws-client`, and `cmd/demo-grpc-client` for one minimal, complete
+example of each, and `docker-compose.yml` for all three running against a
+containerized logGO at once.
+
+| Protocol | Endpoint | Shape |
+|---|---|---|
+| REST | `POST /ingest` | One JSON body per request: `{"source","level","message","fields","timestamp"}` (`timestamp` optional, RFC3339, defaults to now) |
+| WebSocket | `GET /ws/ingest` | Same JSON shape as REST, one text message per entry, over a connection the client keeps open |
+| gRPC | `IngestService/Ingest` (`proto/ingest/v1/ingest.proto`) | Real gRPC wire format (not just Connect's own JSON-ish protocol) over cleartext HTTP/2 (h2c) — no TLS needed for local/demo use |
+
+All three write through the same `ingest()` helper (`cmd/server/ingest_handlers.go`)
+into the one shared `Manager`, tagged with the pushed `source` field exactly
+like a pulled entry — the UI's sidebar and filtering don't distinguish
+between "logGO pulled this" and "a client pushed this."
+
+Registering a push source first is a convenience, not a requirement —
+`source` in a pushed entry is never validated against the registry. Push
+without registering and it shows up under its raw `source` string; register
+first and it shows up under the friendly name (and protocol badge) instead,
+and you get the connection snippet.
+
+```bash
+# REST
+docker compose up loggo demo-rest-client
+
+# all three protocols at once
+docker compose up
+```
+
 ### API
 
 | Method | Path | Notes |
@@ -166,6 +212,9 @@ things actually happened — see `manager_test.go`'s
 | GET | `/sources` | List registered sources (API keys never included) |
 | POST | `/sources` | Add one — `{"name","base_url","api_key"}` |
 | DELETE | `/sources/{id}` | Stop ingesting from it (history stays) |
+| POST | `/ingest` | Push one entry via REST — see "Push ingestion" |
+| GET | `/ws/ingest` | Push entries via a persistent WebSocket — see "Push ingestion" |
+| — | `IngestService/Ingest` (gRPC) | Push one entry via gRPC — see "Push ingestion" |
 
 The UI itself (`internal/webui`) is a single static HTML page — no frontend
 build step, deliberately, to match a "small" project.
