@@ -1,13 +1,13 @@
 @startuml
-title logGO - Ingestion Sequence (internal/ingest.Run)
+title logGO - Ingestion Sequence (internal/ingest.Run, one per PULL source)
 
-participant "cmd/server main()" as Main
+participant "internal/sources.Registry" as Registry
 participant "ingest.Run" as Run
-participant "conTogether\nGET /logs" as REST
-participant "conTogether\nGET /ws/logs" as WS
+participant "remote instance\nGET /logs" as REST
+participant "remote instance\nGET /ws/logs" as WS
 participant "logGO.Manager\n(this instance)" as Manager
 
-Main -> Run: go Run(ctx, opts, manager)
+Registry -> Run: go Run(ctx, opts, manager)\n(spawned by Registry.start —\nonce at boot per persisted source,\nor immediately on a runtime Add;\nctx canceled by Registry.Remove)
 activate Run
 
 == Initial backfill: existing history ==
@@ -42,9 +42,19 @@ end
 Run -> Run: backoff reset to 1s
 Run -> WS: Dial again (back to "Live tail" above)
 
-== Shutdown ==
-Main -> Run: ctx canceled (SIGINT/SIGTERM)
-Run --> Main: return ctx.Err()
+== Ends when the source is removed (not just on process shutdown) ==
+Registry -> Run: ctx canceled (Registry.Remove(id), or process shutdown)
+Run --> Registry: return ctx.Err()
 deactivate Run
+
+note over Registry, Manager
+  This is PULL — logGO connecting out to a
+  registered source. The inverse, PUSH (a
+  client sending straight to logGO over REST/
+  WebSocket/gRPC), is a separate, unrelated
+  code path — see 06-push-ingestion-sequence.puml.
+  Both end up tagging entries with a "source"
+  field and calling the same Manager.WriteEntry.
+end note
 
 @enduml

@@ -3,9 +3,9 @@ title logGO - Core Interfaces & Structure
 
 interface LogEntry {
   +Timestamp() time.Time
-  +Level() string
+  +Level() Level
   +Message() string
-  +Fields() map[string]interface{}
+  +Fields() map[string]any
 }
 
 interface LogWriter {
@@ -17,46 +17,99 @@ interface LogReader {
   +Read(level string, filter LogFilter) ([]LogEntry, error)
 }
 
+interface LogClearer {
+  +Clear(before time.Time) error
+}
+
 interface LogHandler {
   +Handle(entry LogEntry)
 }
 
-class LogManager {
+class Manager {
   -writer LogWriter
   -reader LogReader
+  -clearer LogClearer
   -queue chan LogEntry
-  -handlers []LogHandler
-  -pool sync.Pool
-  +WriteLog(level string, message string)
+  -dropPolicy DropPolicy
+  -dropped atomic.Int64
+  -handlers []registeredHandler
+  +WriteLog(level string, message string, fields ...Field) error
+  +WriteEntry(entry LogEntry) error
   +ReadLogs(level string, filter LogFilter) ([]LogEntry, error)
   +ClearLogs(before time.Time) error
-  +RegisterLogHandler(handler LogHandler)
-  -runWriteLoop()
+  +RegisterLogHandler(handler LogHandler) (unregister func())
+  -run()
 }
 
-class FileLogWriter
-class FileLogReader
-class SQLiteLogWriter
-class SQLiteLogReader
+class "file.Store" as FileStore
+class "sqlite.Store" as SQLiteStore
+class "memory.Store" as MemoryStore
 
-LogWriter <|.. FileLogWriter
-LogReader <|.. FileLogReader
-LogWriter <|.. SQLiteLogWriter
-LogReader <|.. SQLiteLogReader
+note right of FileStore
+  Each backend is ONE type
+  satisfying LogWriter + LogReader
+  + LogClearer together — not
+  separate Writer/Reader types
+  per backend.
+end note
 
-LogManager o-- LogWriter : uses
-LogManager o-- LogReader : uses
-LogManager o-- LogHandler : notifies
-LogManager ..> LogEntry : produces/consumes
+LogWriter <|.. FileStore
+LogReader <|.. FileStore
+LogClearer <|.. FileStore
+LogWriter <|.. SQLiteStore
+LogReader <|.. SQLiteStore
+LogClearer <|.. SQLiteStore
+LogWriter <|.. MemoryStore
+LogReader <|.. MemoryStore
+LogClearer <|.. MemoryStore
 
-note right of LogManager
-  WriteLog() pushes to `queue`;
-  a single background goroutine
-  (runWriteLoop) drains the channel
-  and calls writer.Write(), keeping
-  callers non-blocking (async requirement).
-  LogEntry instances come from a
-  sync.Pool to minimize GC pressure.
+Manager o-- LogWriter : uses
+Manager o-- LogReader : uses
+Manager o-- LogClearer : uses
+Manager o-- LogHandler : notifies
+Manager ..> LogEntry : produces/consumes
+
+note right of Manager
+  WriteLog() builds a LogEntry and
+  pushes it onto `queue`; a single
+  background goroutine (`run`) drains
+  the channel, calls writer.Write(),
+  then fans the entry out to every
+  registered LogHandler — callers
+  never block on I/O (the async
+  requirement).
+
+  Backpressure is a choice: DropPolicy
+  is Block (default: back off the
+  caller until there's room) or
+  DropNewest (discard + count via
+  Dropped()), set via WithDropPolicy.
+
+  Entries are plain values, not
+  pooled — an earlier design pooled
+  them via sync.Pool, but that's
+  unsafe here: entries fan out to an
+  arbitrary number of LogHandlers, and
+  nothing stops a handler from
+  retaining the pointer past its
+  Handle() call. The actual low-GC
+  requirement is met where the real
+  allocation hot spot is instead: the
+  file backend pools *bytes.Buffer for
+  JSON encoding (no aliasing risk,
+  since its contents are fully copied
+  out before the buffer returns to the
+  pool). See README's "Entries are
+  immutable values, not pooled."
+
+  WriteEntry (distinct from WriteLog)
+  enqueues an already-built LogEntry
+  as-is, preserving its original
+  timestamp instead of stamping
+  time.Now() — this is what the
+  standalone server (04) uses for
+  every entry it ingests or receives,
+  pulled or pushed.
 end note
 
 @enduml

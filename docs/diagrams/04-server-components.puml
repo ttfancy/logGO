@@ -1,47 +1,67 @@
 @startuml
 title logGO - cmd/server Component Overview
 
-package "logGO process" {
-  component "config\n(env vars)" as Config
-  component "internal/ingest\nRun(ctx, opts, manager)" as Ingest
-  component "logGO.Manager\n(this instance's own log store)" as Manager
-  component "internal/webui\nstatic UI page" as WebUI
-  component "HTTP mux\nGET /, GET /entries, GET /healthz" as Mux
-  file "logGO.log\n(JSON lines)" as LogFile
-}
-
-cloud "Remote conTogether instance" {
-  component "GET /logs\n(REST backfill)" as ContogetherREST
-  component "GET /ws/logs\n(WebSocket live tail)" as ContogetherWS
-}
+left to right direction
 
 actor Browser
+actor "Pushing client\n(any protocol)" as Pusher
+cloud "Any remote instance\nshaped like conTogether" as Remote
 
-Config --> Ingest : BaseURL, APIKey, Source
-Config --> Mux : Port
+package "logGO process" {
+  component "HTTP mux" as Mux
+  component "internal/webui" as WebUI
+  component "internal/sources.Registry" as Registry
+  component "internal/ingest\n(one goroutine per\nPULL source)" as Ingest
+  component "ingest_handlers.go\n(REST+WS+gRPC push)" as PushHandlers
+  component "logGO.Manager" as Manager
+  file "logGO.log" as LogFile
+  file "sources.json" as SourcesFile
+}
 
-Ingest -down-> ContogetherREST : HTTP GET (X-API-Key header)
-Ingest -down-> ContogetherWS : WS Dial (?api_key=)
-Ingest -> Manager : WriteEntry(entry)\n(preserves original timestamp)
+Browser --> Mux
+Pusher --> Mux
+Mux --> WebUI
+Mux --> Registry
+Mux --> PushHandlers
+Mux --> Manager
 
-Manager -> LogFile : append (async write loop)
-Mux -> Manager : ReadLogs(level, filter)
-Mux -> WebUI : serve index.html
+Registry --> SourcesFile : persist
+Registry --> Ingest : spawn per\nPULL source
+Ingest --> Remote : backfill + live tail
+Ingest --> Manager : WriteEntry, tagged\nsource=<source ID>
+PushHandlers --> Manager : WriteEntry, tagged\nsource=<client's tag>
+Manager --> LogFile : append
 
-Browser -> Mux : GET / , GET /entries?level=&contains=
-
-note right of Ingest
-  The only relationship between the two
-  projects: logGO is a network *client* of
-  conTogether's already-existing log-reading
-  endpoints. Neither imports the other's code.
+note bottom of Mux
+  Browser: GET /, /entries, /ws/entries, /sources, POST /sources, DELETE /sources/{id}
+  Pusher:  POST /ingest (REST), GET /ws/ingest (WS), IngestService/Ingest (gRPC, h2c)
 end note
 
-note bottom of Manager
-  Same Manager, same package, this instance
-  just happens to store entries collected
-  from elsewhere instead of (or alongside)
-  writing about itself.
+note bottom of Registry
+  A Source is either:
+  - **pull** (kind="pull", BaseURL+APIKey): logGO connects OUT via internal/ingest.
+  - **push** (kind="push", Protocol only): no connection — just a reserved
+    name/ID; a client pushes TO logGO tagged with that ID. Registering is a
+    convenience (name + connection snippet), never enforced — an
+    unregistered source still works, tagged under its raw string.
+  A legacy sources.json from before "kind" existed has none — treated as pull.
+end note
+
+note bottom of PushHandlers
+  Three protocols in, one path out: all three handlers call the same
+  ingest() helper, which tags the source field and calls WriteEntry —
+  see 06-push-ingestion-sequence.puml.
+end note
+
+note bottom of Ingest
+  Pulling from conTogether (or anything similarly shaped) is a network
+  *client* relationship only — neither project imports the other's code.
+  See 05-ingestion-sequence.puml.
+end note
+
+note bottom of SourcesFile
+  API keys live here in cleartext (0600
+  perms) — the one place they're stored.
 end note
 
 @enduml

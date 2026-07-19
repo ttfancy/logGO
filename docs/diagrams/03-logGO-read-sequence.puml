@@ -2,7 +2,7 @@
 title logGO - ReadLogs Sequence (Filtered Query)
 
 actor Client
-participant LogManager
+participant "Manager" as LogManager
 participant LogReader
 database Backend as "File / SQLite"
 

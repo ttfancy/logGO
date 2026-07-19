@@ -2,7 +2,8 @@
 
 A small, dependency-injected logging system: asynchronous writes, pluggable
 storage, level filtering, and an extension point for things like remote log
-aggregation — built around four interfaces rather than one concrete logger
+aggregation — built around five interfaces (`LogEntry`, `LogWriter`,
+`LogReader`, `LogClearer`, `LogHandler`) rather than one concrete logger
 type.
 
 See [`docs/diagrams/`](docs/diagrams/) for PlantUML diagrams of the structure
@@ -10,9 +11,11 @@ and call flows below: core interfaces/structure
 ([`01`](docs/diagrams/01-logGO-structure.puml)), the write
 ([`02`](docs/diagrams/02-logGO-write-sequence.puml)) and read
 ([`03`](docs/diagrams/03-logGO-read-sequence.puml)) paths, and the standalone
-server's component layout ([`04`](docs/diagrams/04-server-components.puml))
-and ingestion sequence ([`05`](docs/diagrams/05-ingestion-sequence.puml)) —
-see "Standalone server" below.
+server's component layout ([`04`](docs/diagrams/04-server-components.puml)),
+pull-ingestion sequence ([`05`](docs/diagrams/05-ingestion-sequence.puml)),
+and push-ingestion sequence
+([`06`](docs/diagrams/06-push-ingestion-sequence.puml)) — see "Standalone
+server" below.
 
 ## Install
 
@@ -124,6 +127,32 @@ Open http://localhost:9090 (override with `PORT`) and click **+ Add
 service** — no env vars required to get started; sources are managed at
 runtime, not fixed at boot.
 
+### Building
+
+```bash
+# The server binary
+go build -o loggo-server ./cmd/server
+
+# The three demo push clients (see "Push ingestion" below)
+go build -o demo-rest ./cmd/demo-rest-client
+go build -o demo-ws ./cmd/demo-ws-client
+go build -o demo-grpc ./cmd/demo-grpc-client
+
+# Or install any of them onto $GOPATH/bin
+go install ./cmd/server
+
+# Docker: build the server image directly...
+docker build -t loggo .
+docker run -p 9090:9090 loggo
+
+# ...or build/run everything (server + all three demo clients) at once
+docker compose up --build
+```
+
+`Dockerfile` builds the server; `cmd/Dockerfile.demo-client` is a shared,
+parameterized build for the three demo clients (see `docker-compose.yml`
+for how each is built with a different `CLIENT` build arg).
+
 ### Multi-source registry
 
 Any number of sources can be registered at once (`internal/sources`), each
@@ -194,6 +223,26 @@ Registering a push source first is a convenience, not a requirement —
 without registering and it shows up under its raw `source` string; register
 first and it shows up under the friendly name (and protocol badge) instead,
 and you get the connection snippet.
+
+One concrete example per protocol, against a server running on
+`localhost:9090`:
+
+```bash
+# REST — one request per entry
+curl -X POST http://localhost:9090/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"my-service","level":"INFO","message":"hello"}'
+
+# WebSocket — one connection, one JSON message per entry (wscat)
+wscat -c ws://localhost:9090/ws/ingest
+> {"source":"my-service","level":"INFO","message":"hello"}
+
+# gRPC — real gRPC wire format over h2c (grpcurl, plaintext)
+grpcurl -plaintext -d '{"source":"my-service","entry":{"level":"INFO","message":"hello"}}' \
+  localhost:9090 ingest.v1.IngestService/Ingest
+```
+
+Or run the demo clients, which do this on a timer:
 
 ```bash
 # REST

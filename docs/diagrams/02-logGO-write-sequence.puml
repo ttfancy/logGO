@@ -2,18 +2,19 @@
 title logGO - WriteLog Sequence (Async Write Path)
 
 participant Caller
-participant LogManager
+participant Manager
 queue Channel as "queue chan LogEntry"
-participant WriterLoop as "runWriteLoop() goroutine"
+participant WriterLoop as "run() goroutine"
 participant LogWriter
 participant Handlers as "Registered LogHandlers"
 
-Caller -> LogManager: WriteLog(level, message)
-activate LogManager
-LogManager -> LogManager: build LogEntry (from sync.Pool)
-LogManager -> Channel: enqueue entry (non-blocking)
-LogManager --> Caller: return (does not wait for I/O)
-deactivate LogManager
+Caller -> Manager: WriteLog(level, message, fields...)
+activate Manager
+Manager -> Manager: RLock stateMu; build LogEntry (plain value, not pooled)
+Manager -> Channel: enqueue entry\n(Block: wait for room, or DropNewest: drop + count)
+Manager -> Manager: RUnlock stateMu
+Manager --> Caller: return (does not wait for I/O)
+deactivate Manager
 
 == Background, decoupled from caller ==
 activate WriterLoop
@@ -21,7 +22,26 @@ WriterLoop -> Channel: dequeue entry
 WriterLoop -> LogWriter: Write(entry)
 LogWriter --> WriterLoop: ok / error
 WriterLoop -> Handlers: Handle(entry) for each registered handler
-WriterLoop -> LogManager: release entry back to sync.Pool
 deactivate WriterLoop
+
+note right of Manager
+  The RWMutex (stateMu) is what makes Close
+  race-free: WriteLog holds RLock for the
+  whole check-then-send, Close takes Lock
+  (which waits out every in-flight RLock)
+  before closing the channel — provably safe
+  to call concurrently with in-flight writes,
+  not just "safe in practice." See
+  manager_test.go's concurrent test, run
+  under -race.
+
+  Entries are never pooled/reused: a handler
+  can retain the pointer past its Handle()
+  call, so reusing the struct afterward would
+  corrupt whatever it kept. WriteEntry (not
+  shown here) is the same path but enqueues an
+  already-built LogEntry as-is, preserving its
+  original timestamp — see 01 and 05.
+end note
 
 @enduml

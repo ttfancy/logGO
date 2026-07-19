@@ -1,0 +1,57 @@
+@startuml
+title logGO - Push Ingestion (three protocols, one path in)
+
+actor "REST client" as RESTClient
+actor "WebSocket client" as WSClient
+actor "gRPC client" as GRPCClient
+participant "handleIngestREST" as REST
+participant "handleIngestWS" as WS
+participant "ingestServiceHandler\n(gRPC/Connect)" as GRPC
+participant "ingest()" as Shared
+participant Manager as "logGO.Manager"
+
+== Protocol 1: REST — one request per entry ==
+RESTClient -> REST: POST /ingest\n{"source","level","message","fields","timestamp"?}
+activate REST
+REST -> Shared: ingest(manager, payload)
+REST --> RESTClient: 202 Accepted
+deactivate REST
+
+== Protocol 2: WebSocket — one connection, many entries ==
+WSClient -> WS: GET /ws/ingest (upgrade)
+activate WS
+loop for each entry, same JSON shape as REST
+  WSClient -> WS: text frame: {"source","level","message",...}
+  WS -> Shared: ingest(manager, payload)
+  note right: malformed JSON is dropped,\nnot a connection close — one bad\nline shouldn't end a long-lived stream
+end
+deactivate WS
+
+== Protocol 3: gRPC — schema'd, real gRPC wire format over h2c ==
+GRPCClient -> GRPC: IngestService.Ingest(IngestRequest{source, entry})
+activate GRPC
+GRPC -> GRPC: decode entry.fields (each a JSON-encoded\nstring value) back into map[string]any
+GRPC -> Shared: ingest(manager, payload)\n(timestamp: entry.timestamp_unix_nano if set, else now)
+GRPC --> GRPCClient: IngestResponse{}
+deactivate GRPC
+
+== Shared tail: all three protocols land here ==
+activate Shared
+Shared -> Shared: fields["source"] = payload.Source\n(same tag a pulled entry gets — see 04, 05)
+Shared -> Manager: WriteEntry(NewEntry(ts, level, message, fields))
+note right: WriteEntry, not WriteLog — preserves\nthe entry's own timestamp (defaults to\ntime.Now() only if the client omitted one),\nsince a push may be relaying something that\nalready happened.
+deactivate Shared
+
+note over RESTClient, GRPCClient
+  cmd/demo-rest-client, cmd/demo-ws-client, and
+  cmd/demo-grpc-client are one complete, working
+  example of each — see scripts/demo-push.sh to
+  run all three against a live server at once.
+  Registering a push source via the UI (or
+  POST /sources with kind="push") is optional:
+  it just reserves a friendly name/ID and shows
+  a connection snippet — pushing works with any
+  "source" string, registered or not.
+end note
+
+@enduml
