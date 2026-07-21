@@ -8,9 +8,9 @@ Two things, in one module:
    dependency-injected, asynchronous writes, pluggable storage, level
    filtering.
 2. A standalone log-**aggregator service** (`cmd/server`) built on top
-   of it, Dozzle-style: pull logs from any number of remote instances,
-   or have any number of clients push logs straight to it over REST,
-   WebSocket, or gRPC, all shown together, live, in one UI.
+   of it: pull logs from any number of remote instances, or have any
+   number of clients push logs straight to it over REST, WebSocket, or
+   gRPC, all shown together, live, in one UI.
 
 It has no code relationship with any specific project. Anything that
 exposes `GET /logs` + `GET /ws/logs` can be pulled from, and anything
