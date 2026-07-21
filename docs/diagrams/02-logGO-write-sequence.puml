@@ -21,7 +21,11 @@ activate WriterLoop
 WriterLoop -> Channel: dequeue entry
 WriterLoop -> LogWriter: Write(entry)
 LogWriter --> WriterLoop: ok / error
-WriterLoop -> Handlers: Handle(entry) for each registered handler
+alt Write succeeded
+  WriterLoop -> Handlers: Handle(entry) for each registered handler
+else Write failed
+  WriterLoop -> WriterLoop: drop entry, continue\n(no handler notified, no crash)
+end
 deactivate WriterLoop
 
 note right of Manager

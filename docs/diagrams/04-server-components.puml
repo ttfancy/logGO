@@ -35,6 +35,7 @@ Manager --> LogFile : append
 note bottom of Mux
   Browser: GET /, /entries, /ws/entries, /sources, POST /sources, DELETE /sources/{id}
   Pusher:  POST /ingest (REST), GET /ws/ingest (WS), IngestService/Ingest (gRPC, h2c)
+  Ops:     GET /healthz (no auth, not shown above)
 end note
 
 note bottom of Registry
