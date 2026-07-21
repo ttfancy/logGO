@@ -14,7 +14,7 @@ interface LogWriter {
 }
 
 interface LogReader {
-  +Read(level string, filter LogFilter) ([]LogEntry, error)
+  +Read(minLevel Level, filter LogFilter) ([]LogEntry, error)
 }
 
 interface LogClearer {
